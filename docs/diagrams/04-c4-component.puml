@@ -1,0 +1,23 @@
+@startuml 04-c4-component
+!include <C4/C4_Component>
+
+title 04 Components: worker process
+
+Person(developer, "Developer", "Calls the API.")
+Container(frontend, "Reflex frontend", "React app that Reflex generates from Python", "Shows the home page.")
+
+Container_Boundary(worker, "Worker process") {
+  Component(entry, "reflex_fastapi_webhook_studio.py", "Reflex rx.App", "Builds app = rx.App(api_transformer=create_api()) and adds the index page. Holds the empty State class.")
+  Component(api, "api/app.py", "FastAPI", "create_api() builds the FastAPI app. router serves GET /api/v1/health through health(), which returns the status and ~__version~__.")
+  Component(package, "~__init~__.py", "Python package", "Sets ~__version~__ from the installed package metadata, which comes from pyproject.toml.")
+  Component(runtime, "Reflex runtime", "Reflex 0.10", "Serves /_event and /ping, and runs state and lifespan tasks.")
+}
+
+Rel(entry, api, "Calls create_api()")
+Rel(api, package, "Reads __version__")
+Rel(entry, runtime, "Mounts the FastAPI app through api_transformer")
+Rel(frontend, runtime, "Sends events, gets state", "WebSocket /_event")
+Rel(developer, api, "GET /api/v1/health", "HTTP")
+
+SHOW_LEGEND()
+@enduml
