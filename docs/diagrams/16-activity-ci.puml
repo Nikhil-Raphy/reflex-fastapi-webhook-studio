@@ -1,0 +1,56 @@
+@startuml 16-activity-ci
+title 16 CI, docs and releases
+
+start
+switch (What starts the run?)
+case (weekly schedule)
+  :Dependabot opens grouped pull requests
+  for **uv** and **github-actions**
+  (only for releases at least 7 days old);
+  :Each pull request runs **ci.yml**;
+case (pull request)
+  :Run **ci.yml**;
+case (push to main)
+  fork
+    :Run **ci.yml**;
+  fork again
+    :**docs.yml**: zensical build ~--clean ~--strict;
+    :Deploy the site to GitHub Pages;
+  fork again
+    :**release-please.yml**;
+    if (Release pull request merged?) then (yes)
+      :Tag vX.Y.Z, update CHANGELOG.md
+      and make a GitHub release;
+    else (no)
+      :Open or update the release pull request;
+    endif
+  end fork
+endswitch
+stop
+
+partition "ci.yml" {
+  start
+  :Cancel older runs on the same ref;
+  fork
+    :**lint** job;
+    :uv sync --locked;
+    :ruff check .;
+    :ruff format --check .;
+    :pylint;
+    :mypy .;
+  fork again
+    :**test** job;
+    :uv sync --locked;
+    :pytest --cov
+    (fails under 90% coverage);
+  fork again
+    :**audit** job;
+    :uv export --locked
+    (every group and extra, with hashes);
+    :pip-audit
+    (fails on any known flaw);
+  end fork
+  stop
+}
+
+@enduml

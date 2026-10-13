@@ -1,0 +1,18 @@
+@startuml 03-c4-container
+!include <C4/C4_Container>
+
+title 03 Containers: Reflex FastAPI Webhook Studio
+
+Person(developer, "Developer", "Opens the app in a browser and calls the API.")
+
+System_Boundary(studio, "Reflex FastAPI Webhook Studio") {
+  Container(frontend, "Reflex frontend", "React app that Reflex generates from Python", "Shows the home page in the browser.")
+  Container(worker, "Worker process", "Python 3.14, Granian, Reflex 0.10, FastAPI", "Runs the Reflex backend and the mounted FastAPI app. In production mode it also serves the built frontend files.")
+}
+
+Rel(developer, frontend, "Opens the home page", "HTTP")
+Rel(frontend, worker, "Sends events, gets state", "WebSocket /_event")
+Rel(developer, worker, "GET /api/v1/health", "HTTP")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,31 @@
+@startuml 15-deployment
+title 15 Deployment: one developer machine
+
+node "Developer machine" {
+  node "Browser" as browser
+
+  frame "Dev mode: uv run reflex run" {
+    node "Frontend dev server\n(React Router, Vite)\nport 17300" as devserver {
+      artifact "Reflex frontend" as frontend_dev
+    }
+    node "Python 3.14 process\n(Granian, one worker)\nport 17301" as backend_dev {
+      component "Reflex backend" as reflex_dev
+      component "FastAPI app" as api_dev
+    }
+  }
+
+  frame "Production mode: uv run reflex run ~--env prod ~--backend-port 17300" {
+    node "Python 3.14 process\n(Granian, one worker)\nport 17300" as backend_prod {
+      artifact "Built frontend files" as frontend_prod
+      component "Reflex backend" as reflex_prod
+      component "FastAPI app" as api_prod
+    }
+  }
+}
+
+browser --> devserver : HTTP, page
+browser --> reflex_dev : WebSocket /_event
+browser --> api_dev : HTTP /api/v1/health
+browser --> backend_prod : HTTP and WebSocket,\npage, /_event and /api/v1/health
+
+@enduml
