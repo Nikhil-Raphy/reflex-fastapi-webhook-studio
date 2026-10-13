@@ -53,11 +53,20 @@ ignore = ["D203", "D213", "COM812", "ISC001", "CPY"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "sqlmodel.SQLModel"]
+# FastAPI builds reply schemas from domain dataclasses, so their field types must import at run time.
+runtime-evaluated-decorators = ["dataclasses.dataclass"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["reflex_fastapi_webhook_studio"]
+# The local alembic/ folder holds migrations; the import means the library.
+known-third-party = ["alembic"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
+# Alembic loads these files by path; an __init__.py would hide the alembic library.
+"alembic/**" = ["INP001"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -68,10 +77,23 @@ py-version = "3.14"
 [tool.pylint."messages control"]
 disable = [
     "too-few-public-methods", # Reflex state classes hold vars and handlers, not public methods.
+    "too-many-instance-attributes", # Value records and table rows hold one field per column.
 ]
 
 [tool.pylint.format]
 max-line-length = 120
+
+[tool.pylint.imports]
+# The local alembic/ folder holds migrations; the import means the library.
+known-third-party = ["alembic"]
+
+[tool.pylint.similarities]
+# Field lists repeat across the domain, table and API layers by design; flag only longer copied blocks.
+min-similarity-lines = 8
+
+[tool.pylint.typecheck]
+# Alembic builds these modules' functions at run time.
+ignored-modules = ["alembic.context", "alembic.op"]
 
 [tool.mypy]
 python_version = "3.14"
