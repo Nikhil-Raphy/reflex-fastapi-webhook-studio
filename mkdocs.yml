@@ -1,0 +1,15 @@
+site_name: Reflex FastAPI Webhook Studio
+site_description: Catch, inspect and replay webhooks and HTTP requests.
+site_url: https://nikhil-raphy.github.io/reflex-fastapi-webhook-studio/
+repo_url: https://github.com/Nikhil-Raphy/reflex-fastapi-webhook-studio
+repo_name: Nikhil-Raphy/reflex-fastapi-webhook-studio
+copyright: Copyright 2026 Nikhil-Raphy. Apache-2.0 license.
+
+nav:
+  - Home: index.md
+  - Decisions:
+      - adr/index.md
+      - adr/0001-one-process-fastapi-in-reflex.md
+      - adr/0007-tooling.md
+      - adr/0008-docs-with-zensical.md
+      - adr/0009-releases-and-dependency-updates.md
