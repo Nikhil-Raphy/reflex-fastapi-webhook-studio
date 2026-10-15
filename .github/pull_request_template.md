@@ -4,8 +4,10 @@
 
 ## Checks
 
-- [ ] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pylint reflex_fastapi_webhook_studio tests rxconfig.py` and `uv run mypy .` pass.
-- [ ] `uv run pytest --cov` passes with at least 90% coverage.
+- [ ] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pylint --recursive=y reflex_fastapi_webhook_studio tests rxconfig.py alembic` and `uv run mypy .` pass.
+- [ ] `uv run pytest --cov` passes with at least 90% coverage, on SQLite and on PostgreSQL
+      (`WEBHOOK_STUDIO_TEST_DATABASE_URL` set).
+- [ ] A schema change comes with an Alembic migration that upgrades and downgrades.
 - [ ] Each new test follows Given / When / Then.
 - [ ] Docs describe only what this change builds.
 
