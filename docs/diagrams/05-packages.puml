@@ -1,0 +1,47 @@
+@startuml 05-packages
+title 05 Packages and the imports allowed between them
+
+skinparam packageStyle folder
+
+package "reflex_fastapi_webhook_studio" {
+  package "reflex_fastapi_webhook_studio.py\n(app entry)" as entry
+  package "api" as api
+  package "services" as services
+  package "db" as db
+  package "domain.py" as domain
+  package "settings.py" as settings
+  package "log_config.py" as log_config
+}
+package "alembic\n(migrations)" as alembic
+
+entry --> api
+entry --> db : Database
+entry --> settings
+entry --> log_config
+
+api --> services
+api --> domain
+api --> settings
+api ..> db : type hints only\n(Database)
+
+services --> db : repository,\nDatabase
+services --> domain
+services --> settings
+services --> log_config
+
+db --> domain
+
+alembic --> db : models, engine
+alembic --> settings
+
+api -[#red,dashed]-> db : <color:red>banned:\n<color:red>repository and models
+services -[#red,dashed]-> api : <color:red>banned
+db -[#red,dashed]-> services : <color:red>banned
+domain -[#red,dashed]-> services : <color:red>banned: domain.py,\n<color:red>settings.py and log_config.py\n<color:red>import nothing from the app
+
+note bottom of entry
+  Nothing imports the app entry module.
+  Routers call services, never the repository.
+  Services take and return domain dataclasses, never table rows.
+end note
+@enduml

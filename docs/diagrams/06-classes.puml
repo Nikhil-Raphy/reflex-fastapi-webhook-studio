@@ -1,0 +1,140 @@
+@startuml 06-classes
+title 06 Classes: domain types, services and repository
+
+hide empty members
+skinparam classAttributeIconSize 0
+
+package "domain.py" {
+  enum HttpMethod <<StrEnum>> {
+    GET
+    HEAD
+    POST
+    PUT
+    PATCH
+    DELETE
+    OPTIONS
+  }
+
+  class Bin <<frozen dataclass>> {
+    id: str
+    label: str | None
+    created_at: datetime
+    last_activity_at: datetime
+    expires_at: datetime
+  }
+
+  class IncomingRequest <<frozen dataclass>> {
+    method: HttpMethod
+    path: str
+    query_string: str
+    headers: NameValuePairs
+    body: bytes
+    body_size: int
+    body_truncated: bool
+    content_type: str | None
+    remote_addr: str | None
+    http_version: str
+  }
+
+  class RequestSummary <<frozen dataclass>> {
+    id: UUID
+    received_at: datetime
+    method: HttpMethod
+    path: str
+    query_string: str
+    body_size: int
+    body_truncated: bool
+    content_type: str | None
+    reply_status: int
+  }
+
+  class CapturedRequest <<frozen dataclass>> {
+    id: UUID
+    bin_id: str
+    received_at: datetime
+    method: HttpMethod
+    path: str
+    query_string: str
+    query_params: NameValuePairs
+    headers: NameValuePairs
+    body: bytes
+    body_size: int
+    body_truncated: bool
+    body_preview: str
+    content_type: str | None
+    remote_addr: str | None
+    http_version: str
+    reply_status: int
+  }
+
+  class BinNotFoundError <<LookupError>>
+  class RequestNotFoundError <<LookupError>>
+  class BinLimitError <<Exception>>
+
+  note "NameValuePairs = tuple[tuple[str, str], ...]\nClock = Callable[[], datetime]" as aliases
+}
+
+package "services" {
+  class BinService {
+    + BinService(database: Database, settings: Settings, clock: Clock = utc_now)
+    + async create(label: str | None): Bin
+    + async get(bin_id: str): Bin
+    + async rename(bin_id: str, label: str | None): Bin
+  }
+
+  class CaptureService {
+    + CaptureService(database: Database, settings: Settings, clock: Clock = utc_now)
+    + async capture(bin_id: str, incoming: IncomingRequest, *, reply_status: int): CapturedRequest
+  }
+
+  class RequestService {
+    + RequestService(database: Database)
+    + async list(bin_id: str, *, limit: int): list[RequestSummary]
+    + async get(bin_id: str, request_id: UUID): CapturedRequest
+  }
+}
+
+package "db" {
+  class repository <<module>> {
+    + async add_bin(session, bin_: Bin): None
+    + async count_bins(session): int
+    + async get_bin(session, bin_id: str): Bin | None
+    + async set_label(session, bin_id: str, label: str | None): Bin | None
+    + async touch_bin(session, bin_id: str, *, at: datetime, expires_at: datetime): None
+    + async add_request(session, request: CapturedRequest): None
+    + async trim_requests(session, bin_id: str, *, keep: int): None
+    + async list_requests(session, bin_id: str, *, limit: int): list[RequestSummary]
+    + async get_request(session, bin_id: str, request_id: UUID): CapturedRequest | None
+  }
+
+  class Database {
+    + url: str
+    + engine: AsyncEngine
+    + sessions: async_sessionmaker[AsyncSession]
+    + async check(): None
+    + async lifespan(): AsyncIterator[None]
+  }
+}
+
+IncomingRequest --> HttpMethod
+RequestSummary --> HttpMethod
+CapturedRequest --> HttpMethod
+
+BinService ..> repository : calls
+CaptureService ..> repository : calls
+RequestService ..> repository : calls
+BinService --> Database
+CaptureService --> Database
+RequestService --> Database
+
+BinService ..> Bin : returns
+BinService ..> BinLimitError : raises
+BinService ..> BinNotFoundError : raises
+CaptureService ..> IncomingRequest : takes
+CaptureService ..> CapturedRequest : returns
+CaptureService ..> BinNotFoundError : raises
+RequestService ..> RequestSummary : returns
+RequestService ..> CapturedRequest : returns
+RequestService ..> BinNotFoundError : raises
+RequestService ..> RequestNotFoundError : raises
+@enduml

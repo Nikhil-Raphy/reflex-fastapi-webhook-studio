@@ -1,0 +1,53 @@
+@startuml 07-data-model
+title 07 Data model (* = NOT NULL)
+
+hide circle
+skinparam linetype ortho
+
+entity "bin" as bin {
+  * id : String(22) <<PK>>
+  --
+  label : String(80)
+  * created_at : DateTime, UTC
+  * last_activity_at : DateTime, UTC
+  * expires_at : DateTime, UTC <<indexed>>
+  * reply_status : Integer = 200
+  reply_content_type : String(255)
+  * reply_headers : JSON or JSONB = []
+  reply_body : Text
+  * reply_delay_ms : Integer = 0
+}
+
+entity "captured_request" as captured_request {
+  * id : Uuid, UUIDv7 <<PK>>
+  --
+  * bin_id : String(22) <<FK>>
+  * received_at : DateTime, UTC
+  * method : String(7)
+  * path : Text
+  * query_string : Text
+  * query_params : JSON or JSONB
+  * headers : JSON or JSONB
+  * body : LargeBinary
+  * body_size : Integer
+  * body_truncated : Boolean
+  * body_preview : Text
+  content_type : String(255)
+  remote_addr : String(45)
+  * http_version : String(8)
+  * reply_status : Integer
+}
+
+bin ||--o{ captured_request : "holds\n(ON DELETE CASCADE)"
+
+note right of bin
+  Index ix_bin_expires_at on (expires_at)
+end note
+
+note right of captured_request
+  Index ix_captured_request_bin_id_id
+  on (bin_id, id DESC).
+  UUIDv7 ids sort by time,
+  so this index lists a bin newest first.
+end note
+@enduml

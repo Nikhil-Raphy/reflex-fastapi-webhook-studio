@@ -1,0 +1,39 @@
+@startuml 01-use-case
+title 01 Use cases
+left to right direction
+
+actor "Sender\n(an outside service or curl)" as sender
+actor "Developer" as developer
+actor "Operator\n(runs the server)" as operator
+
+rectangle "Reflex FastAPI Webhook Studio" {
+  usecase "Send a request to a bin\n(GET, HEAD, POST, PUT, PATCH,\nDELETE or OPTIONS, at the bin URL\nor any path under it)" as send
+  usecase "Send a CORS preflight\nfrom a browser" as preflight
+  usecase "Create a bin,\nwith an optional label" as create
+  usecase "Rename a bin\nor clear its label" as rename
+  usecase "Read a bin" as read_bin
+  usecase "List a bin's requests,\nnewest first" as list
+  usecase "Read one request in full" as read_request
+  usecase "Browse the API docs\nat /api/docs" as docs
+  usecase "Create or upgrade the database\n(alembic upgrade head)" as migrate
+  usecase "Set the database and limits\nwith WEBHOOK_STUDIO_* variables" as configure
+  usecase "Start the server\n(reflex run)" as start
+  usecase "Check health\n(GET /api/v1/health)" as health
+}
+
+sender --> send
+sender --> preflight
+preflight .> send : <<extend>>
+
+developer --> create
+developer --> rename
+developer --> read_bin
+developer --> list
+developer --> read_request
+developer --> docs
+
+operator --> migrate
+operator --> configure
+operator --> start
+operator --> health
+@enduml
