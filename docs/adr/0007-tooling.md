@@ -34,3 +34,9 @@ length of 120. It needs strict typing and as few tools as possible.
   real types.
 - One Reflex stub flaw remains: it types `rx.color_mode` as a `Var`, so `rx.color_mode.button` carries a
   `# type: ignore[attr-defined]`. With that, `mypy --strict` passes on the Reflex page code.
+- Ruff moves imports that serve only type hints under `TYPE_CHECKING`, but FastAPI, Pydantic and Reflex read some
+  type hints at run time. `pyproject.toml` marks SQLModel and Pydantic models and dataclasses as read at run time.
+  Other imports that a framework reads, such as the types in a route's signature, carry a `noqa` with the reason.
+- The migrations live in `alembic/`, the same name as the library. Ruff and pylint treat `alembic` as a third-party
+  package, and pylint runs with `--recursive=y` so it checks the migrations too.
+- The table, domain and API layers repeat field lists, so pylint flags copied blocks only from 8 lines up.

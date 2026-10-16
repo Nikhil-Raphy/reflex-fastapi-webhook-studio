@@ -10,6 +10,9 @@ nav:
   - Decisions:
       - adr/index.md
       - adr/0001-one-process-fastapi-in-reflex.md
+      - adr/0002-sqlmodel-own-async-engine-and-alembic.md
+      - adr/0003-sqlite-and-postgresql.md
+      - adr/0006-capture-replies-in-csp-sandbox.md
       - adr/0007-tooling.md
       - adr/0008-docs-with-zensical.md
       - adr/0009-releases-and-dependency-updates.md
