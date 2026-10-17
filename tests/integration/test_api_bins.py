@@ -6,6 +6,7 @@ from uuid import uuid7
 
 import pytest
 
+from reflex_fastapi_webhook_studio.domain import BinListing
 from reflex_fastapi_webhook_studio.settings import Settings
 from tests.factories import api_client
 
@@ -38,6 +39,34 @@ async def test_given_no_body_when_bin_is_created_then_label_is_empty(database: D
     # Then
     assert created.status_code == 201
     assert created.json()["label"] is None
+
+
+@pytest.mark.anyio
+async def test_given_all_listing_when_bins_are_listed_then_each_shows_with_its_count(database: Database) -> None:
+    """Given `all` listing and a bin with one request, when bins are listed, then it shows with a count of 1."""
+    # Given
+    async with api_client(database, Settings(bin_listing=BinListing.ALL)) as client:
+        bin_id = (await client.post("/api/v1/bins", json={"label": "orders"})).json()["id"]
+        await client.post(f"/api/webhook/{bin_id}", content=b"x")
+        # When
+        response = await client.get("/api/v1/bins")
+    # Then
+    assert response.status_code == 200
+    assert [(row["id"], row["label"], row["request_count"]) for row in response.json()] == [(bin_id, "orders", 1)]
+
+
+@pytest.mark.anyio
+async def test_given_browser_listing_when_bins_are_listed_then_404_problem(database: Database) -> None:
+    """Given `browser` listing, when every bin is asked for, then the reply is a 404 problem body."""
+    # Given
+    async with api_client(database) as client:
+        await client.post("/api/v1/bins")
+        # When
+        response = await client.get("/api/v1/bins")
+    # Then
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["detail"] == "Listing every bin is off."
 
 
 @pytest.mark.anyio
