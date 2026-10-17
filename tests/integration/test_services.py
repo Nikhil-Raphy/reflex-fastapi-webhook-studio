@@ -7,11 +7,16 @@ from uuid import uuid7
 
 import pytest
 
+from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.domain import (
+    BinEvent,
     BinLimitError,
+    BinListing,
     BinNotFoundError,
+    EventType,
     HttpMethod,
     IncomingRequest,
+    ListingOffError,
     RequestNotFoundError,
 )
 from reflex_fastapi_webhook_studio.services.bins import BinService
@@ -160,3 +165,66 @@ async def test_given_unknown_bin_or_request_when_read_then_not_found(database: D
         await requests.get("bad", uuid7())
     with pytest.raises(RequestNotFoundError):
         await requests.get(bin_.id, uuid7())
+
+
+@pytest.mark.anyio
+async def test_given_all_listing_when_bins_are_listed_then_most_active_come_first_with_counts(
+    database: Database,
+) -> None:
+    """Given `all` listing and two bins, when every bin is listed, then the busier one comes first with its count."""
+    # Given
+    settings = replace(SETTINGS, bin_listing=BinListing.ALL)
+    quiet = await BinService(database, settings, clock=lambda: NOW).create("quiet")
+    busy = await BinService(database, settings, clock=lambda: NOW).create("busy")
+    capture = CaptureService(database, settings, clock=lambda: NOW + timedelta(minutes=5))
+    for _ in range(2):
+        await capture.capture(busy.id, INCOMING, reply_status=200)
+    # When
+    listed = await BinService(database, settings).list_all()
+    # Then
+    assert [(row.id, row.label, row.request_count) for row in listed] == [(busy.id, "busy", 2), (quiet.id, "quiet", 0)]
+    assert listed[0].last_activity_at == NOW + timedelta(minutes=5)
+
+
+@pytest.mark.anyio
+async def test_given_browser_listing_when_every_bin_is_listed_then_listing_is_off(database: Database) -> None:
+    """Given `browser` listing, when every bin is listed, then the service refuses."""
+    # Given
+    bins = BinService(database, SETTINGS)
+    # When / Then
+    with pytest.raises(ListingOffError):
+        await bins.list_all()
+
+
+@pytest.mark.anyio
+async def test_given_known_ids_when_summaries_are_read_then_only_existing_bins_return(database: Database) -> None:
+    """Given ids a browser remembers, some unknown or malformed, when summaries are read, then only real bins return."""
+    # Given
+    bins = BinService(database, SETTINGS, clock=lambda: NOW)
+    kept = await bins.create("kept")
+    await bins.create("not asked for")
+    # When
+    listed = await bins.summaries([kept.id, "AbCdEfGhIjKlMnOpQrStUv", "bad", kept.id])
+    none = await bins.summaries(["bad"])
+    # Then
+    assert [row.id for row in listed] == [kept.id]
+    assert none == []
+
+
+@pytest.mark.anyio
+async def test_given_subscriber_when_request_is_captured_or_bin_renamed_then_events_arrive(database: Database) -> None:
+    """Given a subscriber of a bin, when a request is captured and the bin renamed, then both events arrive."""
+    # Given
+    bus = MemoryBus()
+    bins = BinService(database, SETTINGS, bus=bus, clock=lambda: NOW)
+    bin_ = await bins.create("old")
+    async with bus.subscribe(bin_.id) as events:
+        # When
+        stored = await CaptureService(database, SETTINGS, bus=bus).capture(bin_.id, INCOMING, reply_status=200)
+        await bins.rename(bin_.id, "new")
+        got = [await events.next(1), await events.next(1)]
+    # Then
+    assert got == [
+        BinEvent(type=EventType.REQUEST_CAPTURED, bin_id=bin_.id, request=stored.summary()),
+        BinEvent(type=EventType.BIN_UPDATED, bin_id=bin_.id, label="new"),
+    ]

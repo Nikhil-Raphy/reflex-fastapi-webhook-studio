@@ -2,13 +2,21 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlmodel import col
 
 from reflex_fastapi_webhook_studio.db.models import BinRow, CapturedRequestRow
-from reflex_fastapi_webhook_studio.domain import Bin, CapturedRequest, HttpMethod, NameValuePairs, RequestSummary
+from reflex_fastapi_webhook_studio.domain import (
+    Bin,
+    BinSummary,
+    CapturedRequest,
+    HttpMethod,
+    NameValuePairs,
+    RequestSummary,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from datetime import datetime
     from uuid import UUID
 
@@ -58,6 +66,32 @@ async def get_bin(session: AsyncSession, bin_id: str) -> Bin | None:
     """
     row = await session.get(BinRow, bin_id)
     return None if row is None else _bin(row)
+
+
+async def list_bins(session: AsyncSession, bin_ids: Collection[str] | None = None) -> list[BinSummary]:
+    """List bins with their request counts, the most recently active first.
+
+    Args:
+        session: An open session.
+        bin_ids: The bins to list; every bin when None.
+
+    Returns:
+        Short forms of the bins.
+    """
+    query = _bin_summaries()
+    if bin_ids is not None:
+        query = query.where(col(BinRow.id).in_(bin_ids))
+    rows = await session.execute(query)
+    return [
+        BinSummary(
+            id=row.id,
+            label=row.label,
+            created_at=row.created_at,
+            last_activity_at=row.last_activity_at,
+            request_count=row.request_count,
+        )
+        for row in rows
+    ]
 
 
 async def set_label(session: AsyncSession, bin_id: str, label: str | None) -> Bin | None:
@@ -230,6 +264,23 @@ def _bin(row: BinRow) -> Bin:
         last_activity_at=row.last_activity_at,
         expires_at=row.expires_at,
     )
+
+
+def _bin_summaries() -> Select[tuple[str, str | None, datetime, datetime, int]]:
+    request_count = (
+        select(func.count())
+        .select_from(CapturedRequestRow)
+        .where(col(CapturedRequestRow.bin_id) == col(BinRow.id))
+        .correlate(BinRow)
+        .scalar_subquery()
+    )
+    return select(
+        col(BinRow.id),
+        col(BinRow.label),
+        col(BinRow.created_at),
+        col(BinRow.last_activity_at),
+        request_count.label("request_count"),
+    ).order_by(col(BinRow.last_activity_at).desc(), col(BinRow.id))
 
 
 def _pairs(stored: list[list[str]]) -> NameValuePairs:

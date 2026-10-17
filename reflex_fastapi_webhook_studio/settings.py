@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Self
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from reflex_fastapi_webhook_studio.domain import BinListing
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
@@ -31,6 +33,7 @@ class Settings:
         max_requests_per_bin: Most requests a bin keeps; the oldest go first.
         bin_ttl_days: Days a bin lives after its last captured request.
         max_bins: Most bins the app holds at once.
+        bin_listing: Which bins the home page lists.
         log_level: Name of the stdlib log level.
     """
 
@@ -40,6 +43,7 @@ class Settings:
     max_requests_per_bin: int = 500
     bin_ttl_days: int = 7
     max_bins: int = 1000
+    bin_listing: BinListing = BinListing.BROWSER
     log_level: str = "INFO"
 
     @classmethod
@@ -65,6 +69,7 @@ class Settings:
             max_requests_per_bin=read("max_requests_per_bin", _positive_int, defaults.max_requests_per_bin),
             bin_ttl_days=read("bin_ttl_days", _positive_int, defaults.bin_ttl_days),
             max_bins=read("max_bins", _positive_int, defaults.max_bins),
+            bin_listing=read("bin_listing", _bin_listing, defaults.bin_listing),
             log_level=read("log_level", _log_level, defaults.log_level),
         )
 
@@ -95,6 +100,14 @@ def _boolean(name: str, raw: str) -> bool:
         case _:
             msg = f"{name} must be true or false, not {raw!r}."
             raise SettingsError(msg)
+
+
+def _bin_listing(name: str, raw: str) -> BinListing:
+    try:
+        return BinListing(raw.strip().lower())
+    except ValueError:
+        msg = f"{name} must be one of {', '.join(BinListing)}, not {raw!r}."
+        raise SettingsError(msg) from None
 
 
 def _log_level(name: str, raw: str) -> str:
