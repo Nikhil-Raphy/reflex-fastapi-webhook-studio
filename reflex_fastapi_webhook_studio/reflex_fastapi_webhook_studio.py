@@ -5,18 +5,18 @@ from typing import TYPE_CHECKING, override
 import reflex as rx
 
 from reflex_fastapi_webhook_studio.api.app import ApiFirst, create_api
-from reflex_fastapi_webhook_studio.db.engine import Database
-from reflex_fastapi_webhook_studio.log_config import configure_logging
-from reflex_fastapi_webhook_studio.settings import get_settings
-from rxconfig import config
+from reflex_fastapi_webhook_studio.bus.redis_bus import RedisBus
+from reflex_fastapi_webhook_studio.runtime import bus, database, redis, settings
+from reflex_fastapi_webhook_studio.ui.live import sockets
+from reflex_fastapi_webhook_studio.ui.pages.home import home
+from reflex_fastapi_webhook_studio.ui.pages.inspector import inspector
+from reflex_fastapi_webhook_studio.ui.state.home import HomeState
+from reflex_fastapi_webhook_studio.ui.state.inspector import InspectorState
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp
 
-settings = get_settings()
-configure_logging(settings.log_level)
-database = Database(settings.database_url)
-api = create_api(settings, database)
+api = create_api(settings, database, bus=bus, redis=redis)
 
 
 class StudioApp(rx.App):
@@ -32,37 +32,15 @@ class StudioApp(rx.App):
         return ApiFirst(api, super().__call__())
 
 
-class State(rx.State):
-    """The app state."""
-
-
-def index() -> rx.Component:
-    """Build the home page.
-
-    Returns:
-        The home page.
-    """
-    return rx.container(
-        rx.color_mode.button(position="top-right"),  # type: ignore[attr-defined]  # Reflex stub types it as Var.
-        rx.vstack(
-            rx.heading("Welcome to Reflex!", size="9"),
-            rx.text(
-                "Get started by editing ",
-                rx.code(f"{config.app_name}/{config.app_name}.py"),
-                size="5",
-            ),
-            rx.link(
-                rx.button("Check out our docs!"),
-                href="https://reflex.dev/docs/getting-started/introduction/",
-                is_external=True,
-            ),
-            spacing="5",
-            justify="center",
-            min_height="85vh",
-        ),
-    )
-
-
 app = StudioApp()
-app.add_page(index)
+app.add_page(home, route="/", title="Webhook Studio", on_load=HomeState.load)
+app.add_page(
+    inspector,
+    route="/bins/[bin_id]",
+    title="Bin · Webhook Studio",
+    on_load=[InspectorState.load, InspectorState.watch],
+)
 app.register_lifespan_task(database.lifespan)
+if isinstance(bus, RedisBus):
+    app.register_lifespan_task(bus.listen)
+sockets.attach(app)
