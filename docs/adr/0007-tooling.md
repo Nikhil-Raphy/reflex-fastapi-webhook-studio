@@ -19,6 +19,8 @@ length of 120. It needs strict typing and as few tools as possible.
 - **Types:** `mypy --strict` with the Pydantic plugin.
 - **Tests:** pytest with the anyio plugin and `pytest-cov`. Lines and branches together must reach 90% coverage.
   Test names and `# Given` / `# When` / `# Then` blocks carry the Gherkin form, not `.feature` files.
+- **Browser tests:** pytest-playwright drives the built app in production mode. They carry the `e2e` marker, and a
+  plain `pytest` run leaves them out; `pytest -m e2e` runs them.
 - **Hooks:** pre-commit runs Ruff, `uv lock`, mypy, pylint, file checks and a Conventional Commits check.
 
 ## Consequences
@@ -40,3 +42,16 @@ length of 120. It needs strict typing and as few tools as possible.
 - The migrations live in `alembic/`, the same name as the library. Ruff and pylint treat `alembic` as a third-party
   package, and pylint runs with `--recursive=y` so it checks the migrations too.
 - The table, domain and API layers repeat field lists, so pylint flags copied blocks only from 8 lines up.
+- Reflex reads the type hints of event handlers and `rx.foreach` render functions at run time, so modules under `ui/`
+  import those names at run time; Ruff's type-checking import rules are off there.
+- mypy reads Reflex's typing in places Reflex did not aim for:
+  - State vars use `rx.Field[...]` and `rx.field(...)`, so mypy sees a `Var` on the class and the value on an
+    instance.
+  - Plain handlers carry no `@rx.event`, since mypy reads that decorator as a class. Reflex turns every public state
+    method into a handler anyway. Only the background handler keeps it, with a pylint note.
+  - `bind()` in `ui/components/common.py` passes browser-side values to a handler with one `cast`, and the inspector
+    casts its one dataclass var to `ObjectVar`.
+- State tests build a state with Reflex's `_reflex_internal_init=True` flag and call its handlers directly.
+- Reflex 0.10.0 pins vite 8.3.2, which has known flaws in its dev server. `reflex.lock/package.json` holds an
+  `overrides` entry that installs vite 8.3.5 instead, and Reflex keeps that entry when it rebuilds the frontend. The
+  entry can go once Reflex pins a fixed vite.

@@ -6,9 +6,9 @@ it, in one process.
 
 ## What it does
 
-You create a bin and get a URL. Any request sent to that URL, or to a path under it, is stored: the method, path,
-query, headers in the order they came, and the exact body bytes. You read the stored requests back through a REST
-API. This version has no pages of its own yet; the home page is the Reflex blank page.
+You make a bin and get a URL. Any request sent to that URL, or to a path under it, is stored: the method, path,
+query, headers in the order they came, and the exact body bytes. The bin's page in your browser shows each request
+the moment it arrives, with no refresh. A REST API gives the same data to scripts.
 
 ## Run it
 
@@ -38,7 +38,20 @@ uv run reflex run --env prod --backend-port 17300
 
 Then the home page is at <http://localhost:17300> and the API under <http://localhost:17300/api/>.
 
-## Use it
+## Use the pages
+
+- **Make a bin:** on the home page, type a label if you want one and press **New bin**. The bin's page opens with
+  its URL and a **Copy URL** button. While the bin is empty, the page shows a curl command to copy.
+- **Open a bin:** paste its id, its URL or its page address into the **Open a bin** box. The home page lists the
+  bins made in this browser, or every bin when `WEBHOOK_STUDIO_BIN_LISTING` is `all`.
+- **Inspect requests:** the list on the left shows the newest first, with the method in a colour of its own. Click
+  one to see it in four tabs: Overview, Headers, Query and Body. Headers that often hold secrets show as `••••`
+  until clicked. JSON bodies are laid out with indents, form data shows as a table, and binary bodies show their size
+  with a **Download** button. The page never renders a body as HTML.
+- **Live updates:** new requests appear at once, in every tab that has the bin open. The dot at the top right shows
+  **Live**, **Connecting** or **Offline**.
+
+## Use the API
 
 The examples use dev mode. In production mode, use port 17300.
 
@@ -79,11 +92,12 @@ in `body_base64`, and also in `body_text` when it is valid UTF-8.
 | ------ | --------------------------------------------- | ----------------------------------------------- |
 | any    | `/api/webhook/{bin_id}` and any path under it | Catch a request                                 |
 | POST   | `/api/v1/bins`                                | Create a bin, with an optional label. Returns `201`. |
+| GET    | `/api/v1/bins`                                | List every bin with its request count. Only when `WEBHOOK_STUDIO_BIN_LISTING` is `all`; otherwise `404`. |
 | GET    | `/api/v1/bins/{bin_id}`                       | Read a bin                                      |
 | PATCH  | `/api/v1/bins/{bin_id}`                       | Change or clear the label                       |
 | GET    | `/api/v1/bins/{bin_id}/requests`              | List requests, newest first; `limit` 1 to 100, 50 if left out |
 | GET    | `/api/v1/bins/{bin_id}/requests/{request_id}` | Read one request in full                        |
-| GET    | `/api/v1/health`                              | Check that the app and its database answer      |
+| GET    | `/api/v1/health`                              | Check that the app, its database and Redis, when used, answer |
 
 Errors come as [problem details](https://www.rfc-editor.org/rfc/rfc9457) with the type
 `application/problem+json`. The OpenAPI page is at `/api/docs` and the schema at `/api/openapi.json`.
@@ -100,7 +114,9 @@ value is wrong.
 | `WEBHOOK_STUDIO_MAX_BODY_BYTES`       | `1048576`                                    | Largest body to store, in bytes.                           |
 | `WEBHOOK_STUDIO_MAX_REQUESTS_PER_BIN` | `500`                                        | Most requests a bin keeps. The oldest go first.            |
 | `WEBHOOK_STUDIO_MAX_BINS`             | `1000`                                       | Most bins the app holds. One more gets `409`.              |
+| `WEBHOOK_STUDIO_BIN_LISTING`          | `browser`                                    | Which bins the home page lists: `browser` or `all`.         |
 | `WEBHOOK_STUDIO_LOG_LEVEL`            | `INFO`                                       | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.          |
+| `REFLEX_REDIS_URL`                    | unset                                        | A Redis URL. When set, Reflex keeps page state in Redis and can run several workers, and live updates travel through it. |
 
 To keep your settings in a file, copy `.env.example` to `.env`, edit it, and load it with `set -a; . ./.env; set +a`
 before you run `alembic` or `reflex`.
@@ -112,6 +128,8 @@ To use PostgreSQL, run `uv sync --extra postgres`, set `WEBHOOK_STUDIO_DATABASE_
 
 - There are no accounts. The bin id is the secret: 22 characters holding 128 random bits. Anyone who has it can send
   to the bin and read all it caught.
+- With `WEBHOOK_STUDIO_BIN_LISTING=all`, anyone who can open the home page sees every bin id.
+- Masked headers are hidden on screen only. The browser still receives their values.
 - Every reply from `/api/webhook/` carries `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
 - With CORS on, capture replies carry `Access-Control-Allow-Origin: *`, never with credentials. The management API
   under `/api/v1` sends no CORS headers.

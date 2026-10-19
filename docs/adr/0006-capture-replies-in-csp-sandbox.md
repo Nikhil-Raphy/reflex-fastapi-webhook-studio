@@ -8,7 +8,7 @@ Accepted
 
 The capture routes under `/api/webhook/` answer anyone who has a bin's URL, from the same origin as the app's pages.
 A browser that opens a capture URL must never run content from that reply with the app's origin, or a script there
-could read the app's storage and cookies.
+could read the app's storage and cookies. The inspector shows what senders sent, so it must never run that either.
 
 ## Decision
 
@@ -17,6 +17,8 @@ could read the app's storage and cookies.
   handler never builds, such as a `405`.
 - When `WEBHOOK_STUDIO_CORS_ENABLED` is `true`, capture replies also carry `Access-Control-Allow-Origin: *`, never
   with credentials. The management API under `/api/v1` sends no CORS headers.
+- The inspector never renders captured content as HTML. It shows bodies, headers and query values as text or in a
+  code block, which React escapes.
 
 ## Consequences
 
