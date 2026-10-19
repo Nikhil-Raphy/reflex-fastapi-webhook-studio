@@ -1,0 +1,24 @@
+@startuml 02-c4-container
+!include <C4/C4_Container>
+
+title 02 Containers: Reflex FastAPI Webhook Studio
+
+Person(developer, "Developer", "Opens the app in a browser and calls the REST API.")
+System_Ext(sender, "Sender", "A webhook service, a web page or curl.")
+
+System_Boundary(studio, "Reflex FastAPI Webhook Studio") {
+  Container(frontend, "Reflex frontend", "React app that Reflex generates from Python", "The home page and each bin's inspector page, kept live over the websocket.")
+  Container(worker, "Worker process (one, or several with Redis)", "Python 3.14, Granian, Reflex 0.10, FastAPI", "ApiFirst sends each request under /api to the FastAPI app, and the rest to the Reflex backend. Runs a watch task per open inspector. In production mode it also serves the built frontend files.")
+  ContainerDb(database, "Database", "SQLite file data/webhook_studio.db, or PostgreSQL", "Holds the bin and captured_request tables, which Alembic creates.")
+  ContainerDb(redis, "Redis (optional)", "Set by REFLEX_REDIS_URL", "Reflex page state, and the pub/sub channels webhook-studio:bin:* that carry events between workers.")
+}
+
+Rel(developer, frontend, "Makes bins and watches requests", "HTTP")
+Rel(frontend, worker, "Sends events, gets state", "WebSocket /_event")
+Rel(developer, worker, "Creates bins and reads requests", "HTTP, JSON, /api/v1")
+Rel(sender, worker, "Sends requests to a bin", "HTTP, /api/webhook/{bin_id}/...")
+Rel(worker, database, "Reads and writes", "SQLAlchemy async: aiosqlite or psycopg")
+Rel(worker, redis, "Keeps state, publishes and hears bin events", "Redis protocol")
+
+SHOW_LEGEND()
+@enduml

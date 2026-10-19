@@ -1,5 +1,5 @@
-@startuml 15-deployment
-title 15 Deployment: one developer machine
+@startuml 06-deployment
+title 06 Deployment: one developer machine
 
 node "Developer machine" {
   node "Browser" as browser
@@ -17,7 +17,7 @@ node "Developer machine" {
   }
 
   frame "Production mode: uv run reflex run ~--env prod ~--backend-port 17300" {
-    node "Python 3.14 process\n(Granian, one worker)\nport 17300" as backend_prod {
+    node "Python 3.14 process\n(Granian; one worker, or several\nwhen REFLEX_REDIS_URL is set)\nport 17300" as backend_prod {
       artifact "Built frontend files" as frontend_prod
       component "ApiFirst" as first_prod
       component "Reflex backend" as reflex_prod
@@ -35,6 +35,10 @@ node "PostgreSQL server\n(optional, with uv sync ~--extra postgres)" as postgres
   database "bin, captured_request" as pg_tables
 }
 
+node "Redis server\n(optional, REFLEX_REDIS_URL)" as redis {
+  database "Reflex page state\nwebhook-studio:bin:* channels" as redis_data
+}
+
 browser --> devserver : HTTP, page
 browser --> first_dev : WebSocket /_event,\nHTTP /api/v1
 sender --> first_dev : HTTP /api/webhook
@@ -50,5 +54,7 @@ migrate --> sqlite : creates the tables
 api_dev ..> postgres : psycopg, when\nWEBHOOK_STUDIO_DATABASE_URL\nis postgresql+psycopg://
 api_prod ..> postgres : psycopg
 migrate ..> postgres
+reflex_prod ..> redis : state, events
+api_prod ..> redis : publish events
 
 @enduml

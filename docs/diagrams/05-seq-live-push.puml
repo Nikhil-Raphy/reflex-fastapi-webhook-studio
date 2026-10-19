@@ -1,0 +1,57 @@
+@startuml 05-seq-live-push
+title 05 Live push: one watch task per open inspector
+
+actor "Sender" as sender
+box "Worker A (caught the request)"
+  participant "CaptureService" as capture
+  participant "RedisBus\n(worker A)" as bus_a
+end box
+participant "Redis channel\nwebhook-studio:bin:{bin_id}" as redis
+box "Worker B (holds the tab's websocket)"
+  participant "RedisBus.listen()\n(worker B)" as listen_b
+  participant "MemoryBus\n(worker B)" as memory_b
+  participant "InspectorState.watch()" as watch
+  participant "sockets" as sockets
+end box
+participant "Browser tab" as tab
+
+== Start ==
+tab -> watch : on_load: watch()
+watch -> watch : key = "{WORKER_ID}:{bin_id}"
+alt _watcher == key
+  watch --> tab : return; a task already runs for this tab
+else no task yet
+  watch -> watch : _watcher = key
+  watch -> memory_b : subscribe(bin_id)
+  watch -> watch : _load() from the database
+  watch --> tab : live = True (the dot turns green)
+end
+
+== A request arrives ==
+sender -> capture : POST /api/webhook/{bin_id}
+alt REFLEX_REDIS_URL unset (one worker)
+  capture -> memory_b : publish(request.captured)
+else REFLEX_REDIS_URL set
+  capture -> bus_a : publish(request.captured)
+  bus_a -> redis : PUBLISH (JSON)
+  redis -> listen_b : pmessage
+  listen_b -> memory_b : deliver(event)
+end
+memory_b -> watch : next() gives the event
+alt request already listed
+  watch -> watch : skip it
+else new request
+  watch --> tab : add the row at the top
+end
+
+== Quiet heartbeat ==
+watch -> memory_b : next(15 s) gives None
+watch -> sockets : connected(token)
+alt tab closed
+  watch -> watch : stop; _watcher = "" and live = False
+end
+
+== Resync ==
+memory_b -> watch : resync (its queue was full,\nor the listener reconnected to Redis)
+watch -> watch : _load() from the database
+@enduml

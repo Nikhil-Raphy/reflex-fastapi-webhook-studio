@@ -1,5 +1,5 @@
-@startuml 07-data-model
-title 07 Data model (* = NOT NULL)
+@startuml 03-data-model
+title 03 Data model (* = NOT NULL)
 
 hide circle
 skinparam linetype ortho
