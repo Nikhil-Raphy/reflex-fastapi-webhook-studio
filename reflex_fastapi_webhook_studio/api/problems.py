@@ -9,7 +9,13 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.routing import Match
 
-from reflex_fastapi_webhook_studio.domain import BinLimitError, BinNotFoundError, HttpMethod, RequestNotFoundError
+from reflex_fastapi_webhook_studio.domain import (
+    BinLimitError,
+    BinNotFoundError,
+    HttpMethod,
+    ListingOffError,
+    RequestNotFoundError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -77,6 +83,9 @@ def add_problem_handlers(api: FastAPI) -> None:
     async def bin_limit(_request: Request, _error: Exception) -> JSONResponse:
         return problem(HTTPStatus.CONFLICT, "The app holds the most bins it may.")
 
+    async def listing_off(_request: Request, _error: Exception) -> JSONResponse:
+        return problem(HTTPStatus.NOT_FOUND, "Listing every bin is off.")
+
     async def invalid(_request: Request, error: Exception) -> JSONResponse:
         errors = error.errors() if isinstance(error, RequestValidationError) else []
         return problem(HTTPStatus.UNPROCESSABLE_CONTENT, "The request is not valid.", errors=errors)
@@ -92,5 +101,6 @@ def add_problem_handlers(api: FastAPI) -> None:
     api.add_exception_handler(BinNotFoundError, bin_not_found)
     api.add_exception_handler(RequestNotFoundError, request_not_found)
     api.add_exception_handler(BinLimitError, bin_limit)
+    api.add_exception_handler(ListingOffError, listing_off)
     api.add_exception_handler(RequestValidationError, invalid)
     api.add_exception_handler(HTTPException, http_error)

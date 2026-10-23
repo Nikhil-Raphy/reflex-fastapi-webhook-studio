@@ -12,6 +12,7 @@ nav:
       - adr/0001-one-process-fastapi-in-reflex.md
       - adr/0002-sqlmodel-own-async-engine-and-alembic.md
       - adr/0003-sqlite-and-postgresql.md
+      - adr/0004-live-push-via-event-bus.md
       - adr/0006-capture-replies-in-csp-sandbox.md
       - adr/0007-tooling.md
       - adr/0008-docs-with-zensical.md

@@ -1,0 +1,58 @@
+@startuml 04-seq-capture
+title 04 Capturing a request
+
+actor "Sender" as sender
+participant "ApiFirst" as first
+participant "CaptureReplyHeaders" as headers
+participant "capture_router()\ncapture_request()" as route
+participant "CaptureService" as service
+participant "repository" as repo
+database "Database" as db
+participant "EventBus\n(MemoryBus or RedisBus)" as bus
+participant "InspectorState.watch()\nin each open tab" as watch
+
+sender -> first : POST /api/webhook/{bin_id}/github
+first -> headers : path is under /api
+headers -> route
+
+alt bin_id is not 22 URL-safe characters
+  route --> headers : 404 problem (no database access)
+else bin_id looks right
+  route -> route : read_body(): stream the body,\nstop past WEBHOOK_STUDIO_MAX_BODY_BYTES
+  route -> route : reply_status = 413 if over the cap,\n204 if a CORS preflight, else 200
+  route -> service : capture(bin_id, to_incoming(...), reply_status=...)
+  service -> service : CapturedRequest with a UUIDv7 id,\nquery parsed, NUL replaced in text
+  group one transaction
+    service -> repo : get_bin()
+    repo -> db : SELECT
+    alt no bin has this id
+      service --> route : raise BinNotFoundError
+      route --> headers : 404 problem
+    else bin found
+      service -> repo : add_request()
+      repo -> db : INSERT captured_request
+      service -> repo : trim_requests(keep=WEBHOOK_STUDIO_MAX_REQUESTS_PER_BIN)
+      repo -> db : DELETE the oldest past the cap
+      service -> repo : touch_bin(at=now, expires_at=...)
+      repo -> db : UPDATE bin
+      db --> service : COMMIT
+      service -> bus : publish(BinEvent request.captured,\nwith the request's summary)
+      bus ->> watch : event, on every worker
+      service --> route : CapturedRequest
+      alt body over the cap
+        route --> headers : 413 problem with request_id
+      else CORS preflight
+        route --> headers : 204 with Access-Control-Allow-Methods\nand Access-Control-Allow-Headers
+      else HEAD
+        route --> headers : 200, no body
+      else any other request
+        route --> headers : 200 {"ok": true, "request_id": ...}
+      end
+    end
+  end
+end
+
+headers -> headers : add Content-Security-Policy: sandbox,\nX-Content-Type-Options: nosniff,\nand Access-Control-Allow-Origin: * when CORS is on
+headers --> first
+first --> sender : reply
+@enduml

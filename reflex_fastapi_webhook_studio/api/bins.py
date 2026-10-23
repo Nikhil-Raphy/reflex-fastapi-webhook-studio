@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, status
 
 from reflex_fastapi_webhook_studio.api.schemas import BinCreate, BinUpdate  # noqa: TC001  # FastAPI reads them at run time.
-from reflex_fastapi_webhook_studio.domain import Bin
+from reflex_fastapi_webhook_studio.domain import Bin, BinSummary
 
 if TYPE_CHECKING:
     from reflex_fastapi_webhook_studio.services.bins import BinService
@@ -33,6 +33,15 @@ def bins_router(bins: BinService) -> APIRouter:
     async def create_bin(body: BinCreate | None = None) -> Bin:
         """Create a bin with a new secret id. The label is optional."""
         return await bins.create(None if body is None else body.label)
+
+    @router.get(
+        "",
+        response_model=list[BinSummary],
+        responses={status.HTTP_404_NOT_FOUND: {"description": "Listing every bin is off."}},
+    )
+    async def list_bins() -> list[BinSummary]:
+        """List every bin, the most recently active first. Answers only when `WEBHOOK_STUDIO_BIN_LISTING` is `all`."""
+        return await bins.list_all()
 
     @router.get("/{bin_id}", response_model=Bin, responses=NOT_FOUND)
     async def get_bin(bin_id: str) -> Bin:

@@ -67,6 +67,8 @@ known-third-party = ["alembic"]
 "tests/**" = ["S101", "PLR2004"]
 # Alembic loads these files by path; an __init__.py would hide the alembic library.
 "alembic/**" = ["INP001"]
+# Reflex reads the type hints of event handlers and render functions at run time.
+"reflex_fastapi_webhook_studio/ui/**" = ["TC001", "TC002", "TC003"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -120,7 +122,8 @@ follow_untyped_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+# Browser tests need a browser and a built app; run them with `pytest -m e2e`.
+addopts = "-ra --strict-markers --strict-config -m 'not e2e'"
 markers = [
     "e2e: browser tests with Playwright",
     "postgres: needs WEBHOOK_STUDIO_TEST_DATABASE_URL",

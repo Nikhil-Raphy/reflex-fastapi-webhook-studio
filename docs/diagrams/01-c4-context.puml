@@ -1,0 +1,14 @@
+@startuml 01-c4-context
+!include <C4/C4_Context>
+
+title 01 Context: Reflex FastAPI Webhook Studio
+
+Person(developer, "Developer", "Creates bins and reads the requests they caught.")
+System_Ext(sender, "Sender", "A webhook service, a web page or curl.")
+System(studio, "Reflex FastAPI Webhook Studio", "Catches HTTP requests in bins, stores them, and serves them back through a REST API.")
+
+Rel(sender, studio, "Sends requests to a bin", "HTTP, /api/webhook/{bin_id}/...")
+Rel(developer, studio, "Creates bins and reads requests", "HTTP, JSON, /api/v1")
+
+SHOW_LEGEND()
+@enduml

@@ -2,6 +2,7 @@
 
 import pytest
 
+from reflex_fastapi_webhook_studio.domain import BinListing
 from reflex_fastapi_webhook_studio.settings import Settings, SettingsError
 
 
@@ -19,6 +20,7 @@ def test_given_no_variables_when_settings_load_then_defaults_apply() -> None:
         max_requests_per_bin=500,
         bin_ttl_days=7,
         max_bins=1000,
+        bin_listing=BinListing.BROWSER,
         log_level="INFO",
     )
 
@@ -33,6 +35,7 @@ def test_given_every_variable_when_settings_load_then_values_are_read() -> None:
         "WEBHOOK_STUDIO_MAX_REQUESTS_PER_BIN": "10",
         "WEBHOOK_STUDIO_BIN_TTL_DAYS": "2",
         "WEBHOOK_STUDIO_MAX_BINS": "5",
+        "WEBHOOK_STUDIO_BIN_LISTING": " ALL ",
         "WEBHOOK_STUDIO_LOG_LEVEL": "debug",
     }
     # When
@@ -45,6 +48,7 @@ def test_given_every_variable_when_settings_load_then_values_are_read() -> None:
         max_requests_per_bin=10,
         bin_ttl_days=2,
         max_bins=5,
+        bin_listing=BinListing.ALL,
         log_level="DEBUG",
     )
 
@@ -58,6 +62,7 @@ def test_given_every_variable_when_settings_load_then_values_are_read() -> None:
         ("WEBHOOK_STUDIO_BIN_TTL_DAYS", "1.5"),
         ("WEBHOOK_STUDIO_MAX_BINS", ""),
         ("WEBHOOK_STUDIO_CORS_ENABLED", "maybe"),
+        ("WEBHOOK_STUDIO_BIN_LISTING", "some"),
         ("WEBHOOK_STUDIO_LOG_LEVEL", "LOUD"),
         ("WEBHOOK_STUDIO_DATABASE_URL", "mysql://db/studio"),
         ("WEBHOOK_STUDIO_DATABASE_URL", "not a url"),

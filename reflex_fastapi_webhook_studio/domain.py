@@ -48,6 +48,19 @@ class BinNotFoundError(LookupError):
     """No bin has the given id."""
 
 
+class BinListing(StrEnum):
+    """Which bins the home page lists."""
+
+    BROWSER = "browser"
+    """Only the bins this browser made."""
+    ALL = "all"
+    """Every bin in the database."""
+
+
+class ListingOffError(LookupError):
+    """Listing every bin is off, because the listing mode is `browser`."""
+
+
 class RequestNotFoundError(LookupError):
     """The bin holds no request with the given id."""
 
@@ -118,6 +131,25 @@ class Bin:
     created_at: datetime
     last_activity_at: datetime
     expires_at: datetime
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class BinSummary:
+    """The short form of a bin, for lists.
+
+    Attributes:
+        id: The secret 22-character id.
+        label: An optional name chosen by the user.
+        created_at: When the bin was made.
+        last_activity_at: When the bin last caught a request, or when it was made.
+        request_count: How many requests the bin holds.
+    """
+
+    id: str
+    label: str | None
+    created_at: datetime
+    last_activity_at: datetime
+    request_count: int
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -215,3 +247,47 @@ class CapturedRequest:
     remote_addr: str | None
     http_version: str
     reply_status: int
+
+    def summary(self) -> RequestSummary:
+        """Give the short form of this request.
+
+        Returns:
+            The summary.
+        """
+        return RequestSummary(
+            id=self.id,
+            received_at=self.received_at,
+            method=self.method,
+            path=self.path,
+            query_string=self.query_string,
+            body_size=self.body_size,
+            body_truncated=self.body_truncated,
+            content_type=self.content_type,
+            reply_status=self.reply_status,
+        )
+
+
+class EventType(StrEnum):
+    """What happened to a bin, as told to open inspectors."""
+
+    REQUEST_CAPTURED = "request.captured"
+    BIN_UPDATED = "bin.updated"
+    RESYNC = "resync"
+    """Not published: a bus gives it to a subscriber that missed events, which then reloads."""
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class BinEvent:
+    """One event about a bin.
+
+    Attributes:
+        type: What happened.
+        bin_id: The bin it happened to.
+        request: The new request, for `request.captured`.
+        label: The new label, for `bin.updated`.
+    """
+
+    type: EventType
+    bin_id: str
+    request: RequestSummary | None = None
+    label: str | None = None

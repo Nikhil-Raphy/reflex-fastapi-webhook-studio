@@ -28,6 +28,8 @@ Run one process, with our API in front of Reflex.
 - `ApiFirst` sends each HTTP request for `/api` or a path under it straight to the FastAPI app. Everything else,
   including lifespan and websocket traffic, goes to Reflex.
 - Start-up and shut-down work, such as opening and closing the database, uses `app.register_lifespan_task`.
+- The Reflex pages call the service layer directly, not through HTTP. `runtime.py` builds the settings, database,
+  event bus and services once per worker, and the API and the pages share them.
 
 ## Consequences
 
@@ -45,3 +47,4 @@ Run one process, with our API in front of Reflex.
 - Requests under `/api` skip Reflex's request context, so API code must not touch Reflex state.
 - Lifespan tasks must import the names in their type hints at run time, because Reflex reads each task's
   signature when the server starts.
+- The pages and the REST API use the same service code, so they cannot drift apart.

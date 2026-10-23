@@ -6,11 +6,14 @@ from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl
 from uuid import uuid7
 
+from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.db import repository
 from reflex_fastapi_webhook_studio.domain import (
+    BinEvent,
     BinNotFoundError,
     CapturedRequest,
     Clock,
+    EventType,
     body_preview,
     is_bin_id,
     storable_text,
@@ -19,6 +22,7 @@ from reflex_fastapi_webhook_studio.domain import (
 from reflex_fastapi_webhook_studio.log_config import short_id
 
 if TYPE_CHECKING:
+    from reflex_fastapi_webhook_studio.bus.base import EventBus
     from reflex_fastapi_webhook_studio.db.engine import Database
     from reflex_fastapi_webhook_studio.domain import IncomingRequest
     from reflex_fastapi_webhook_studio.settings import Settings
@@ -29,20 +33,26 @@ logger = logging.getLogger(__name__)
 class CaptureService:
     """Rules for storing captured requests."""
 
-    def __init__(self, database: Database, settings: Settings, clock: Clock = utc_now) -> None:
+    def __init__(
+        self, database: Database, settings: Settings, *, bus: EventBus | None = None, clock: Clock = utc_now
+    ) -> None:
         """Set up the service.
 
         Args:
             database: The database.
             settings: The app settings.
+            bus: Where to tell open inspectors about new requests; a bus with no subscribers when None.
             clock: Gives the current time.
         """
         self._database = database
         self._settings = settings
+        self._bus: EventBus = bus or MemoryBus()
         self._clock = clock
 
     async def capture(self, bin_id: str, incoming: IncomingRequest, *, reply_status: int) -> CapturedRequest:
         """Store a request, drop the bin's oldest beyond the cap, and push the bin's expiry out, in one transaction.
+
+        Then tell the bin's open inspectors about it.
 
         Args:
             bin_id: The bin id from the URL.
@@ -94,4 +104,5 @@ class CaptureService:
             request.body_size,
             reply_status,
         )
+        await self._bus.publish(BinEvent(type=EventType.REQUEST_CAPTURED, bin_id=bin_id, request=request.summary()))
         return request

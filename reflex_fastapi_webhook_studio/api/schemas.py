@@ -81,11 +81,12 @@ class RequestDetailOut(BaseModel):
 
 
 class HealthOut(BaseModel):
-    """The health reply."""
+    """The health reply. `redis` is present only when the app uses Redis."""
 
     status: Literal["ok"]
     version: str
     database: Literal["ok"]
+    redis: Literal["ok"] | None = None
 
 
 class CaptureOut(BaseModel):
