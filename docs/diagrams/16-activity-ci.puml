@@ -33,15 +33,18 @@ partition "ci.yml" {
   :Cancel older runs on the same ref;
   fork
     :**lint** job;
-    :uv sync --locked;
+    :uv sync ~--locked ~--all-extras;
     :ruff check .;
-    :ruff format --check .;
-    :pylint;
+    :ruff format ~--check .;
+    :pylint ~--recursive=y
+    (app, tests, rxconfig.py, alembic);
     :mypy .;
   fork again
     :**test** job;
-    :uv sync --locked;
-    :pytest --cov
+    :Start the PostgreSQL 18 service container
+    (image pinned by digest);
+    :uv sync ~--locked ~--all-extras;
+    :pytest ~--cov on SQLite and PostgreSQL
     (fails under 90% coverage);
   fork again
     :**audit** job;
