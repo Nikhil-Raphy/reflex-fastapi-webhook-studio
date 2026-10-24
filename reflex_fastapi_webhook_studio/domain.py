@@ -13,7 +13,13 @@ if TYPE_CHECKING:
 
 BIN_ID_LENGTH = 22
 MAX_LABEL_LENGTH = 80
+MAX_SEARCH_LENGTH = 200
 PREVIEW_BYTES = 4096
+MAX_REPLY_BODY_BYTES = 65_536
+MAX_REPLY_HEADERS = 32
+MAX_CONTENT_TYPE_LENGTH = 255
+NO_BODY_STATUSES = frozenset({204, 205, 304})
+"""Statuses whose replies never carry a body."""
 _BIN_ID_PATTERN = re.compile(rf"[A-Za-z0-9_-]{{{BIN_ID_LENGTH}}}")
 
 type NameValuePairs = tuple[tuple[str, str], ...]
@@ -57,6 +63,15 @@ class BinListing(StrEnum):
     """Every bin in the database."""
 
 
+class ReplayMode(StrEnum):
+    """Which addresses a replay may reach."""
+
+    RESTRICTED = "restricted"
+    """Only public internet addresses."""
+    LOCAL = "local"
+    """Any address, including this machine and private networks."""
+
+
 class ListingOffError(LookupError):
     """Listing every bin is off, because the listing mode is `browser`."""
 
@@ -67,6 +82,47 @@ class RequestNotFoundError(LookupError):
 
 class BinLimitError(Exception):
     """The app already holds the most bins it may."""
+
+
+class InvalidReplyError(ValueError):
+    """Reply settings break a rule; the message says which."""
+
+
+class ReplayTargetError(ValueError):
+    """The replay target is not an http or https URL with a host."""
+
+
+class ReplayBlockedError(PermissionError):
+    """The replay target resolves to an address that the replay mode does not allow."""
+
+
+class ReplayFailedError(Exception):
+    """The replay could not reach the target or get a full reply; the message says why."""
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class RequestFilter:
+    """Which of a bin's requests to list.
+
+    Attributes:
+        method: Only requests with this method; every method when None.
+        text: Only requests whose method, path, query string, headers or body preview hold this text, in any case.
+    """
+
+    method: HttpMethod | None = None
+    text: str = ""
+
+    @property
+    def active(self) -> bool:
+        """Whether the filter leaves out any request.
+
+        Returns:
+            True when a method or text is set.
+        """
+        return self.method is not None or bool(self.text)
+
+
+EVERY_REQUEST = RequestFilter()
 
 
 def new_bin_id() -> str:
@@ -115,6 +171,28 @@ def body_preview(body: bytes) -> str:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class ReplyConfig:
+    """What a bin sends back to senders.
+
+    Attributes:
+        status: The status code.
+        content_type: The Content-Type of the body, if any.
+        headers: More reply headers, as name-value pairs.
+        body: The body text; None sends the default JSON body with the request id.
+        delay_ms: How long to wait before replying, in milliseconds.
+    """
+
+    status: int = 200
+    content_type: str | None = None
+    headers: NameValuePairs = ()
+    body: str | None = None
+    delay_ms: int = 0
+
+
+DEFAULT_REPLY = ReplyConfig()
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class Bin:
     """A bin that collects requests.
 
@@ -124,6 +202,7 @@ class Bin:
         created_at: When the bin was made.
         last_activity_at: When the bin last caught a request, or when it was made.
         expires_at: When the bin may be deleted.
+        reply: What the bin sends back to senders.
     """
 
     id: str
@@ -131,6 +210,7 @@ class Bin:
     created_at: datetime
     last_activity_at: datetime
     expires_at: datetime
+    reply: ReplyConfig = DEFAULT_REPLY
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -142,6 +222,7 @@ class BinSummary:
         label: An optional name chosen by the user.
         created_at: When the bin was made.
         last_activity_at: When the bin last caught a request, or when it was made.
+        expires_at: When the bin may be deleted.
         request_count: How many requests the bin holds.
     """
 
@@ -149,6 +230,7 @@ class BinSummary:
     label: str | None
     created_at: datetime
     last_activity_at: datetime
+    expires_at: datetime
     request_count: int
 
 
@@ -267,11 +349,35 @@ class CapturedRequest:
         )
 
 
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ReplayResult:
+    """What a target sent back to a replay. It is shown once and never stored.
+
+    Attributes:
+        status: The reply status code.
+        reason: The reason phrase, if the target sent one.
+        elapsed_ms: Milliseconds from sending to the end of the reply, or to the read cap.
+        headers: The reply headers, in order.
+        body: The reply body, up to the read cap.
+        body_truncated: Whether the reply body went on past the read cap.
+    """
+
+    status: int
+    reason: str
+    elapsed_ms: int
+    headers: NameValuePairs
+    body: bytes
+    body_truncated: bool
+
+
 class EventType(StrEnum):
     """What happened to a bin, as told to open inspectors."""
 
     REQUEST_CAPTURED = "request.captured"
+    REQUEST_DELETED = "request.deleted"
     BIN_UPDATED = "bin.updated"
+    BIN_CLEARED = "bin.cleared"
+    BIN_DELETED = "bin.deleted"
     RESYNC = "resync"
     """Not published: a bus gives it to a subscriber that missed events, which then reloads."""
 
@@ -284,10 +390,12 @@ class BinEvent:
         type: What happened.
         bin_id: The bin it happened to.
         request: The new request, for `request.captured`.
+        request_id: The deleted request's id, for `request.deleted`.
         label: The new label, for `bin.updated`.
     """
 
     type: EventType
     bin_id: str
     request: RequestSummary | None = None
+    request_id: UUID | None = None
     label: str | None = None
