@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from functools import cache
 from os import environ
 from typing import TYPE_CHECKING, Self
+from urllib.parse import urlsplit
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
-from reflex_fastapi_webhook_studio.domain import BinListing
+from reflex_fastapi_webhook_studio.domain import BinListing, ReplayMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -34,6 +35,11 @@ class Settings:
         bin_ttl_days: Days a bin lives after its last captured request.
         max_bins: Most bins the app holds at once.
         bin_listing: Which bins the home page lists.
+        max_delay_ms: Longest reply delay a bin may set, in milliseconds.
+        sweep_interval_s: Seconds between deletes of expired bins.
+        replay_mode: Which addresses a replay may reach.
+        replay_timeout_s: Seconds a replay may take in all.
+        public_base_url: The scheme and host that senders use, when the app runs behind a proxy; empty otherwise.
         log_level: Name of the stdlib log level.
     """
 
@@ -44,6 +50,11 @@ class Settings:
     bin_ttl_days: int = 7
     max_bins: int = 1000
     bin_listing: BinListing = BinListing.BROWSER
+    max_delay_ms: int = 30_000
+    sweep_interval_s: int = 3600
+    replay_mode: ReplayMode = ReplayMode.RESTRICTED
+    replay_timeout_s: int = 15
+    public_base_url: str = ""
     log_level: str = "INFO"
 
     @classmethod
@@ -70,6 +81,11 @@ class Settings:
             bin_ttl_days=read("bin_ttl_days", _positive_int, defaults.bin_ttl_days),
             max_bins=read("max_bins", _positive_int, defaults.max_bins),
             bin_listing=read("bin_listing", _bin_listing, defaults.bin_listing),
+            max_delay_ms=read("max_delay_ms", _positive_int, defaults.max_delay_ms),
+            sweep_interval_s=read("sweep_interval_s", _positive_int, defaults.sweep_interval_s),
+            replay_mode=read("replay_mode", _replay_mode, defaults.replay_mode),
+            replay_timeout_s=read("replay_timeout_s", _positive_int, defaults.replay_timeout_s),
+            public_base_url=read("public_base_url", _base_url, defaults.public_base_url),
             log_level=read("log_level", _log_level, defaults.log_level),
         )
 
@@ -108,6 +124,30 @@ def _bin_listing(name: str, raw: str) -> BinListing:
     except ValueError:
         msg = f"{name} must be one of {', '.join(BinListing)}, not {raw!r}."
         raise SettingsError(msg) from None
+
+
+def _replay_mode(name: str, raw: str) -> ReplayMode:
+    try:
+        return ReplayMode(raw.strip().lower())
+    except ValueError:
+        msg = f"{name} must be one of {', '.join(ReplayMode)}, not {raw!r}."
+        raise SettingsError(msg) from None
+
+
+def _base_url(name: str, raw: str) -> str:
+    value = raw.strip().rstrip("/")
+    if not value:
+        return ""
+    msg = f"{name} must be a scheme and host, such as https://studio.example.com, not {raw!r}."
+    try:
+        parts = urlsplit(value)
+        _ = parts.port
+    except ValueError:
+        raise SettingsError(msg) from None
+    extra = parts.path or parts.query or parts.fragment or parts.username or parts.password
+    if parts.scheme not in {"http", "https"} or not parts.hostname or extra:
+        raise SettingsError(msg)
+    return value
 
 
 def _log_level(name: str, raw: str) -> str:
