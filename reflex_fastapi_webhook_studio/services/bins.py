@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.db import repository
 from reflex_fastapi_webhook_studio.domain import (
+    MAX_CONTENT_TYPE_LENGTH,
+    MAX_REPLY_BODY_BYTES,
+    MAX_REPLY_HEADERS,
+    NO_BODY_STATUSES,
     Bin,
     BinEvent,
     BinLimitError,
@@ -15,12 +19,15 @@ from reflex_fastapi_webhook_studio.domain import (
     BinSummary,
     Clock,
     EventType,
+    InvalidReplyError,
     ListingOffError,
+    ReplyConfig,
     is_bin_id,
     new_bin_id,
     utc_now,
 )
 from reflex_fastapi_webhook_studio.log_config import short_id
+from reflex_fastapi_webhook_studio.security.header_rules import is_field_value, reply_header_problem
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -29,7 +36,47 @@ if TYPE_CHECKING:
     from reflex_fastapi_webhook_studio.db.engine import Database
     from reflex_fastapi_webhook_studio.settings import Settings
 
+MIN_REPLY_STATUS = 200
+MAX_REPLY_STATUS = 599
+
 logger = logging.getLogger(__name__)
+
+
+def reply_problem(reply: ReplyConfig, *, max_delay_ms: int) -> str | None:
+    """Check reply settings against the rules for a bin's reply.
+
+    Args:
+        reply: The reply settings.
+        max_delay_ms: The longest delay allowed.
+
+    Returns:
+        What is wrong, or None if the settings are allowed.
+    """
+    if not MIN_REPLY_STATUS <= reply.status <= MAX_REPLY_STATUS:
+        return f"The status must be from {MIN_REPLY_STATUS} to {MAX_REPLY_STATUS}."
+    if not 0 <= reply.delay_ms <= max_delay_ms:
+        return f"The delay must be from 0 to {max_delay_ms} ms."
+    return _body_problem(reply) or _headers_problem(reply)
+
+
+def _body_problem(reply: ReplyConfig) -> str | None:
+    if reply.body is not None and reply.status in NO_BODY_STATUSES:
+        return f"A {reply.status} reply has no body."
+    if reply.body is not None and len(reply.body.encode()) > MAX_REPLY_BODY_BYTES:
+        return f"The body may hold at most {MAX_REPLY_BODY_BYTES // 1024} KiB."
+    content_type = reply.content_type
+    if content_type is not None and (
+        not content_type or len(content_type) > MAX_CONTENT_TYPE_LENGTH or not is_field_value(content_type)
+    ):
+        return "The content type is empty, too long, or holds a control character."
+    return None
+
+
+def _headers_problem(reply: ReplyConfig) -> str | None:
+    if len(reply.headers) > MAX_REPLY_HEADERS:
+        return f"A reply may set at most {MAX_REPLY_HEADERS} headers."
+    problems = (reply_header_problem(name, value) for name, value in reply.headers)
+    return next((problem for problem in problems if problem is not None), None)
 
 
 class BinService:
@@ -146,3 +193,46 @@ class BinService:
                 await self._bus.publish(BinEvent(type=EventType.BIN_UPDATED, bin_id=bin_id, label=label))
                 return bin_
         raise BinNotFoundError
+
+    async def set_reply(self, bin_id: str, reply: ReplyConfig) -> Bin:
+        """Change what a bin sends back to senders, and tell its open inspectors.
+
+        Args:
+            bin_id: The bin id.
+            reply: The new reply settings.
+
+        Returns:
+            The changed bin.
+
+        Raises:
+            InvalidReplyError: If the settings break a rule.
+            BinNotFoundError: If the id is malformed or no bin has it.
+        """
+        problem = reply_problem(reply, max_delay_ms=self._settings.max_delay_ms)
+        if problem is not None:
+            raise InvalidReplyError(problem)
+        if is_bin_id(bin_id):
+            async with self._database.sessions.begin() as session:
+                bin_ = await repository.set_reply(session, bin_id, reply)
+            if bin_ is not None:
+                await self._bus.publish(BinEvent(type=EventType.BIN_UPDATED, bin_id=bin_id, label=bin_.label))
+                return bin_
+        raise BinNotFoundError
+
+    async def delete(self, bin_id: str) -> None:
+        """Delete a bin with its requests, and tell its open inspectors.
+
+        Args:
+            bin_id: The bin id.
+
+        Raises:
+            BinNotFoundError: If the id is malformed or no bin has it.
+        """
+        if not is_bin_id(bin_id):
+            raise BinNotFoundError
+        async with self._database.sessions.begin() as session:
+            deleted = await repository.delete_bin(session, bin_id)
+        if not deleted:
+            raise BinNotFoundError
+        logger.info("Deleted bin %s", short_id(bin_id))
+        await self._bus.publish(BinEvent(type=EventType.BIN_DELETED, bin_id=bin_id))
