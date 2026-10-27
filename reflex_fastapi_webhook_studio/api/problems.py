@@ -13,12 +13,16 @@ from reflex_fastapi_webhook_studio.domain import (
     BinLimitError,
     BinNotFoundError,
     HttpMethod,
+    InvalidReplyError,
     ListingOffError,
+    ReplayBlockedError,
+    ReplayFailedError,
+    ReplayTargetError,
     RequestNotFoundError,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from fastapi import FastAPI, Request
     from starlette.routing import BaseRoute
@@ -67,24 +71,32 @@ def allowed_methods(request: Request) -> list[str]:
     ]
 
 
+DOMAIN_PROBLEMS: dict[type[Exception], tuple[HTTPStatus, str | None]] = {
+    BinNotFoundError: (HTTPStatus.NOT_FOUND, "No bin has this id."),
+    RequestNotFoundError: (HTTPStatus.NOT_FOUND, "The bin holds no request with this id."),
+    BinLimitError: (HTTPStatus.CONFLICT, "The app holds the most bins it may."),
+    ListingOffError: (HTTPStatus.NOT_FOUND, "Listing every bin is off."),
+    InvalidReplyError: (HTTPStatus.UNPROCESSABLE_CONTENT, None),
+    ReplayTargetError: (HTTPStatus.UNPROCESSABLE_CONTENT, None),
+    ReplayBlockedError: (HTTPStatus.FORBIDDEN, None),
+    ReplayFailedError: (HTTPStatus.BAD_GATEWAY, None),
+}
+"""Each domain error's status, and its detail; None means the error's own message."""
+
+
+def _domain_handler(status: HTTPStatus, detail: str | None) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
+    async def handle(_request: Request, error: Exception) -> JSONResponse:
+        return problem(status, str(error) if detail is None else detail)
+
+    return handle
+
+
 def add_problem_handlers(api: FastAPI) -> None:
     """Turn domain errors, bad input and unknown routes into problem details replies.
 
     Args:
         api: The FastAPI app.
     """
-
-    async def bin_not_found(_request: Request, _error: Exception) -> JSONResponse:
-        return problem(HTTPStatus.NOT_FOUND, "No bin has this id.")
-
-    async def request_not_found(_request: Request, _error: Exception) -> JSONResponse:
-        return problem(HTTPStatus.NOT_FOUND, "The bin holds no request with this id.")
-
-    async def bin_limit(_request: Request, _error: Exception) -> JSONResponse:
-        return problem(HTTPStatus.CONFLICT, "The app holds the most bins it may.")
-
-    async def listing_off(_request: Request, _error: Exception) -> JSONResponse:
-        return problem(HTTPStatus.NOT_FOUND, "Listing every bin is off.")
 
     async def invalid(_request: Request, error: Exception) -> JSONResponse:
         errors = error.errors() if isinstance(error, RequestValidationError) else []
@@ -98,9 +110,7 @@ def add_problem_handlers(api: FastAPI) -> None:
             headers["Allow"] = ", ".join(allowed_methods(request))
         return problem(error.status_code, headers=headers)
 
-    api.add_exception_handler(BinNotFoundError, bin_not_found)
-    api.add_exception_handler(RequestNotFoundError, request_not_found)
-    api.add_exception_handler(BinLimitError, bin_limit)
-    api.add_exception_handler(ListingOffError, listing_off)
+    for error_type, (status, detail) in DOMAIN_PROBLEMS.items():
+        api.add_exception_handler(error_type, _domain_handler(status, detail))
     api.add_exception_handler(RequestValidationError, invalid)
     api.add_exception_handler(HTTPException, http_error)
