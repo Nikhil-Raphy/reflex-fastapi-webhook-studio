@@ -198,15 +198,15 @@ async def test_given_unknown_api_path_when_requested_then_404_problem(database: 
 async def test_given_bin_path_when_method_is_not_served_then_405_lists_every_allowed_method(
     database: Database,
 ) -> None:
-    """Given a bin path served by one route per method, when DELETE is sent, then the 405 lists GET and PATCH."""
+    """Given a bin path served by one route per method, when PUT is sent, then the 405 lists DELETE, GET and PATCH."""
     # Given
     async with api_client(database) as client:
         # When
-        response = await client.delete("/api/v1/bins/AbCdEfGhIjKlMnOpQrStUv")
+        response = await client.put("/api/v1/bins/AbCdEfGhIjKlMnOpQrStUv")
     # Then
     assert response.status_code == 405
     assert response.headers["content-type"] == "application/problem+json"
-    assert response.headers.get_list("allow") == ["GET, PATCH"]
+    assert response.headers.get_list("allow") == ["GET, PATCH, DELETE"]
     assert "access-control-allow-origin" not in response.headers
 
 
