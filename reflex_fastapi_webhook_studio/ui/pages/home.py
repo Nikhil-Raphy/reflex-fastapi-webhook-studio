@@ -16,6 +16,7 @@ def _bin_row(row: ObjectVar[BinRowView]) -> rx.Component:
         rx.table.cell(rx.code(row.short_id)),
         rx.table.cell(row.request_count),
         rx.table.cell(Moment.create(row.last_activity_at, from_now=True)),
+        rx.table.cell(Moment.create(row.expires_at, from_now=True)),
         custom_attrs={"data-testid": "bin-row"},
     )
 
@@ -86,6 +87,7 @@ def home() -> rx.Component:
                             rx.table.column_header_cell("Id"),
                             rx.table.column_header_cell("Requests"),
                             rx.table.column_header_cell("Last activity"),
+                            rx.table.column_header_cell("Expires"),
                         )
                     ),
                     rx.table.body(rx.foreach(HomeState.bins, _bin_row)),
