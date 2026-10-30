@@ -93,7 +93,11 @@ def home() -> rx.Component:
                     rx.table.body(rx.foreach(HomeState.bins, _bin_row)),
                     width="100%",
                 ),
-                rx.text("No bins yet.", color_scheme="gray"),
+                rx.cond(
+                    HomeState.loading,
+                    rx.spinner(size="3", custom_attrs={"data-testid": "loading"}),
+                    rx.text("No bins yet.", color_scheme="gray"),
+                ),
             ),
             spacing="4",
             width="100%",

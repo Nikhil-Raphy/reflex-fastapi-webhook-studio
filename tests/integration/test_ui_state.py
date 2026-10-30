@@ -12,20 +12,32 @@ import pytest
 from reflex.istate.data import RouterData
 
 from reflex_fastapi_webhook_studio import runtime
-from reflex_fastapi_webhook_studio.domain import BinEvent, BinListing, EventType, HttpMethod, IncomingRequest
+from reflex_fastapi_webhook_studio.domain import (
+    BinEvent,
+    BinListing,
+    EventType,
+    HttpMethod,
+    IncomingRequest,
+    ReplayMode,
+    ReplyConfig,
+)
 from reflex_fastapi_webhook_studio.services.bins import BinService
 from reflex_fastapi_webhook_studio.services.capture import CaptureService
+from reflex_fastapi_webhook_studio.services.replay import ReplayService
 from reflex_fastapi_webhook_studio.services.requests import RequestService
 from reflex_fastapi_webhook_studio.settings import Settings
+from reflex_fastapi_webhook_studio.ui.state import inspector as inspector_module
 from reflex_fastapi_webhook_studio.ui.state.home import HomeState
-from reflex_fastapi_webhook_studio.ui.state.inspector import InspectorState
-from reflex_fastapi_webhook_studio.ui.views import RequestView
+from reflex_fastapi_webhook_studio.ui.state.inspector import ALL_METHODS, SKIP, InspectorState
+from reflex_fastapi_webhook_studio.ui.views import PairView, ReplayView, ReplyForm, RequestView
 
 if TYPE_CHECKING:
     from reflex.state import BaseState
     from reflex_base.event import EventSpec
 
     from reflex_fastapi_webhook_studio.db.engine import Database
+    from reflex_fastapi_webhook_studio.domain import CapturedRequest
+    from tests.echo import EchoServer
 
 SETTINGS = Settings(max_bins=3)
 INCOMING = IncomingRequest(
@@ -56,6 +68,7 @@ def services(database: Database, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setattr(runtime, "settings", SETTINGS)
     monkeypatch.setattr(runtime, "bin_service", BinService(database, SETTINGS))
     monkeypatch.setattr(runtime, "request_service", RequestService(database))
+    monkeypatch.setattr(runtime, "replay_service", ReplayService(RequestService(database), SETTINGS))
     return SETTINGS
 
 
@@ -98,10 +111,11 @@ async def test_given_browser_listing_when_home_loads_then_only_remembered_bins_s
     await bins.create("other")
     home = make_state(HomeState)
     home.known_bins = json.dumps([kept.id, "bad"])
+    assert home.loading
     # When
     await home.load()
     # Then
-    assert not home.listing_all
+    assert (home.listing_all, home.loading) == (False, False)
     assert [(row.id, row.label) for row in home.bins] == [(kept.id, "kept")]
 
 
@@ -190,10 +204,11 @@ async def test_given_bin_with_requests_when_inspector_loads_then_newest_shows_fi
     older = await capture.capture(bin_.id, INCOMING, reply_status=200)
     newer = await capture.capture(bin_.id, replace(INCOMING, path="/second"), reply_status=200)
     inspector = make_state(InspectorState, f"/bins/{bin_.id}")
+    assert inspector.loading
     # When
     await inspector.load()
     # Then
-    assert (inspector.found, inspector.label, inspector.live) == (True, "orders", False)
+    assert (inspector.found, inspector.label, inspector.live, inspector.loading) == (True, "orders", False, False)
     assert inspector.capture_url.endswith(f"/api/webhook/{bin_.id}")
     assert inspector.curl_command.startswith(f"curl -X POST {inspector.capture_url}")
     assert [row.id for row in inspector.requests] == [str(newer.id), str(older.id)]
@@ -305,3 +320,426 @@ async def test_given_open_inspector_when_bin_events_arrive_then_list_and_label_f
     assert [row.id for row in inspector.requests] == [str(stored.id)]
     assert inspector.detail.id == str(stored.id)
     assert (labelled, inspector.label) == ("renamed", "No label")
+
+
+def args_text(specs: EventSpec | list[EventSpec] | None) -> str:
+    """Join the arguments of one or more events, for assertions.
+
+    Args:
+        specs: The events a handler returned.
+
+    Returns:
+        Their arguments as JavaScript text.
+    """
+    if specs is None:
+        return ""
+    return " ".join(args_of(spec) for spec in (specs if isinstance(specs, list) else [specs]))
+
+
+async def open_bin(
+    database: Database, settings: Settings, *incoming: IncomingRequest
+) -> tuple[InspectorState, list[CapturedRequest]]:
+    """Make a bin, capture requests in it, and load its inspector.
+
+    Args:
+        database: The test database.
+        settings: The settings in use.
+        *incoming: The requests to capture, oldest first.
+
+    Returns:
+        The loaded inspector and the stored requests.
+    """
+    bin_ = await BinService(database, settings).create("orders")
+    capture = CaptureService(database, settings)
+    stored = [await capture.capture(bin_.id, request, reply_status=200) for request in incoming]
+    inspector = make_state(InspectorState, f"/bins/{bin_.id}")
+    await inspector.load()
+    return inspector, stored
+
+
+@pytest.mark.anyio
+async def test_given_bin_with_get_and_post_when_filtered_then_only_matches_list(
+    database: Database, services: Settings
+) -> None:
+    """Given GET and POST requests, when filtered by POST, then searched, then cleared, then the list follows."""
+    # Given
+    get = replace(INCOMING, method=HttpMethod.GET, body=b"", body_size=0)
+    invoice = replace(INCOMING, body=b'{"kind": "invoice"}')
+    inspector, stored = await open_bin(database, services, get, INCOMING, invoice)
+    # When
+    await inspector.set_method_filter("POST")
+    posts = [row.id for row in inspector.requests]
+    await inspector.set_search("INVOICE")
+    found = ([row.id for row in inspector.requests], inspector.total, inspector.filtered)
+    await inspector.set_method_filter("TRACE")
+    any_method = inspector.method_filter
+    await inspector.clear_filters()
+    # Then
+    assert posts == [str(stored[2].id), str(stored[1].id)]
+    assert found == ([str(stored[2].id)], 1, True)
+    assert any_method == ALL_METHODS
+    assert (len(inspector.requests), inspector.filtered) == (3, False)
+
+
+@pytest.mark.anyio
+async def test_given_more_requests_than_a_page_when_scrolled_then_older_pages_load(
+    database: Database, monkeypatch: pytest.MonkeyPatch, services: Settings
+) -> None:
+    """Given five requests and pages of two, when older pages load, then all five show and loading stops."""
+    # Given
+    monkeypatch.setattr(inspector_module, "PAGE_SIZE", 2)
+    inspector, stored = await open_bin(database, services, *[INCOMING] * 5)
+    first_page = (len(inspector.requests), inspector.total, inspector.has_older)
+    # When
+    await inspector.load_older()
+    await inspector.load_older()
+    await inspector.load_older()
+    # Then
+    assert first_page == (2, 5, True)
+    assert [row.id for row in inspector.requests] == [str(request.id) for request in reversed(stored)]
+    assert not inspector.has_older
+
+
+@pytest.mark.anyio
+async def test_given_count_older_than_rows_when_older_page_is_empty_then_loading_stops(
+    database: Database, services: Settings
+) -> None:
+    """Given a count that says more requests exist than do, when the next page is empty, then the count drops."""
+    # Given
+    inspector, _ = await open_bin(database, services, INCOMING)
+    inspector.total = 5
+    # When
+    await inspector.load_older()
+    # Then
+    assert inspector.total == 1
+
+
+@pytest.mark.anyio
+async def test_given_open_inspector_when_delete_and_clear_events_arrive_then_list_follows(
+    database: Database, services: Settings
+) -> None:
+    """Given three requests with the newest picked, when it is deleted elsewhere, then the next shows; clear empties."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING, INCOMING, INCOMING)
+    apply = inspector._apply  # noqa: SLF001  # pylint: disable=protected-access
+    bin_id = stored[0].bin_id
+    # When
+    await runtime.request_service.delete(bin_id, stored[2].id)
+    await apply(BinEvent(type=EventType.REQUEST_DELETED, bin_id=bin_id, request_id=stored[2].id))
+    await apply(BinEvent(type=EventType.REQUEST_DELETED, bin_id=bin_id, request_id=uuid7()))
+    after_delete = ([row.id for row in inspector.requests], inspector.total, inspector.detail.id)
+    await apply(BinEvent(type=EventType.BIN_CLEARED, bin_id=bin_id))
+    # Then
+    assert after_delete == ([str(stored[1].id), str(stored[0].id)], 2, str(stored[1].id))
+    assert (inspector.requests, inspector.total, inspector.detail) == ([], 0, RequestView())
+
+
+@pytest.mark.anyio
+async def test_given_open_inspector_when_bin_is_deleted_elsewhere_then_page_says_so(
+    database: Database, services: Settings
+) -> None:
+    """Given an open inspector, when its bin is deleted elsewhere, then it shows the bin as deleted, with no data."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING)
+    apply = inspector._apply  # noqa: SLF001  # pylint: disable=protected-access
+    # When
+    await apply(BinEvent(type=EventType.BIN_DELETED, bin_id=stored[0].bin_id))
+    # Then
+    assert (inspector.found, inspector.deleted) == (False, True)
+    assert (inspector.requests, inspector.capture_url, inspector.export_url) == ([], "", "")
+
+
+@pytest.mark.anyio
+async def test_given_filter_on_when_request_arrives_then_list_reloads_with_matches_only(
+    database: Database, services: Settings
+) -> None:
+    """Given a POST filter, when a GET and then a POST arrive, then only the POST joins the list."""
+    # Given
+    inspector, _ = await open_bin(database, services)
+    await inspector.set_method_filter("POST")
+    apply = inspector._apply  # noqa: SLF001  # pylint: disable=protected-access
+    capture = CaptureService(database, services)
+    bin_id = inspector.export_url.split("/")[-2]
+    # When
+    for request in (replace(INCOMING, method=HttpMethod.GET), INCOMING):
+        stored = await capture.capture(bin_id, request, reply_status=200)
+        await apply(BinEvent(type=EventType.REQUEST_CAPTURED, bin_id=bin_id, request=stored.summary()))
+    # Then
+    assert [row.method for row in inspector.requests] == ["POST"]
+    assert inspector.total == 1
+
+
+@pytest.mark.anyio
+async def test_given_full_list_when_request_arrives_then_count_stays_at_the_cap(
+    database: Database, monkeypatch: pytest.MonkeyPatch, services: Settings
+) -> None:
+    """Given a bin at its request cap, when one more arrives, then the oldest row goes and the count holds."""
+    # Given
+    settings = replace(services, max_requests_per_bin=2)
+    monkeypatch.setattr(runtime, "settings", settings)
+    inspector, stored = await open_bin(database, settings, INCOMING, INCOMING)
+    apply = inspector._apply  # noqa: SLF001  # pylint: disable=protected-access
+    newest = await CaptureService(database, settings).capture(stored[0].bin_id, INCOMING, reply_status=200)
+    # When
+    await apply(BinEvent(type=EventType.REQUEST_CAPTURED, bin_id=newest.bin_id, request=newest.summary()))
+    # Then
+    assert [row.id for row in inspector.requests] == [str(newest.id), str(stored[1].id)]
+    assert inspector.total == 2
+
+
+@pytest.mark.anyio
+async def test_given_request_on_show_when_user_deletes_it_with_dont_ask_then_next_delete_skips_the_dialog(
+    database: Database, services: Settings
+) -> None:
+    """Given three requests, when one is deleted with "Don't ask again", then the next delete asks nothing."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING, INCOMING, INCOMING)
+    # When
+    asked = await inspector.ask_delete_request()
+    dialog = inspector.confirming
+    inspector.set_dont_ask(True)
+    deleted = await inspector.confirm()
+    skipped = await inspector.ask_delete_request()
+    # Then
+    assert (asked, dialog) == (None, "request")
+    assert "Deleted the request" in args_text(deleted)
+    assert "Deleted the request" in args_text(skipped)
+    assert (inspector.skip_request_confirm, inspector.confirming) == (SKIP, "")
+    assert [row.id for row in inspector.requests] == [str(stored[0].id)]
+    assert await runtime.request_service.count(stored[0].bin_id) == 1
+
+
+@pytest.mark.anyio
+async def test_given_confirm_dialog_when_dismissed_then_nothing_is_deleted(
+    database: Database, services: Settings
+) -> None:
+    """Given the clear dialog open, when dismissed, then nothing is deleted; confirming nothing does nothing."""
+    # Given
+    inspector, _ = await open_bin(database, services, INCOMING)
+    await inspector.ask_clear()
+    # When
+    inspector.set_confirm_open(True)
+    still_open = inspector.confirming
+    inspector.set_confirm_open(False)
+    nothing = await inspector.confirm()
+    # Then
+    assert (still_open, inspector.confirming, nothing) == ("clear", "", None)
+    assert len(inspector.requests) == 1
+
+
+@pytest.mark.anyio
+async def test_given_bin_when_user_clears_it_with_dont_ask_then_it_empties_and_next_clear_skips(
+    database: Database, services: Settings
+) -> None:
+    """Given a bin with requests, when cleared with "Don't ask again", then it empties and the next clear asks not."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING, INCOMING)
+    await inspector.ask_clear()
+    inspector.set_dont_ask(True)
+    # When
+    cleared = await inspector.confirm()
+    again = await inspector.ask_clear()
+    # Then
+    assert "Cleared the bin" in args_text(cleared)
+    assert "Cleared the bin" in args_text(again)
+    assert (inspector.requests, inspector.skip_clear_confirm) == ([], SKIP)
+    assert await runtime.request_service.count(stored[0].bin_id) == 0
+
+
+@pytest.mark.anyio
+async def test_given_bin_when_user_deletes_it_then_home_forgets_it_and_page_moves_home(
+    database: Database, monkeypatch: pytest.MonkeyPatch, services: Settings
+) -> None:
+    """Given a remembered bin, when the user deletes it and confirms, then it is gone, forgotten, and the page moves."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING)
+    bin_id = stored[0].bin_id
+    home = make_state(HomeState)
+    home.known_bins = json.dumps([bin_id])
+
+    async def same_home(_self: InspectorState, _state: type[HomeState]) -> HomeState:
+        return home
+
+    monkeypatch.setattr(InspectorState, "get_state", same_home)
+    await inspector.ask_delete_bin()
+    # When
+    moved = await inspector.confirm()
+    gone = await inspector.ask_delete_bin()
+    # Then
+    assert 'path="/"' in args_text(moved)
+    assert "Deleted the bin" in args_text(moved)
+    assert (inspector.found, inspector.deleted, home.known_bins) == (False, True, "[]")
+    assert gone is None
+    assert inspector.confirming == "bin"
+    inspector.skip_bin_confirm = SKIP
+    assert "gone" in args_text(await inspector.ask_delete_bin())
+
+
+@pytest.mark.anyio
+async def test_given_nothing_on_show_when_deleting_copying_or_replaying_then_it_says_gone(
+    database: Database, services: Settings
+) -> None:
+    """Given an empty bin, when the user deletes, copies or replays the request on show, then each says it is gone."""
+    # Given
+    inspector, _ = await open_bin(database, services)
+    inspector.skip_request_confirm = SKIP
+    # When
+    deleted = await inspector.ask_delete_request()
+    copied = await inspector.copy_as_curl()
+    _ = [step async for step in inspector.send_replay()]
+    inspector.detail = replace(inspector.detail, id=str(uuid7()))
+    deleted_unknown = await inspector.ask_delete_request()
+    copied_unknown = await inspector.copy_as_curl()
+    # Then
+    for result in (deleted, copied, deleted_unknown, copied_unknown):
+        assert "gone" in args_text(result)
+    assert inspector.replay_error == "This request is gone."
+
+
+@pytest.mark.anyio
+async def test_given_request_on_show_when_copied_as_curl_then_command_points_at_the_bin(
+    database: Database, services: Settings
+) -> None:
+    """Given a request on show, when copied as curl, then the command aims at the bin; export points at the API."""
+    # Given
+    inspector, stored = await open_bin(database, services, INCOMING)
+    # When
+    copied = await inspector.copy_as_curl()
+    # Then
+    assert f"curl -X POST {inspector.capture_url}/github" in args_text(copied)
+    assert inspector.export_url.endswith(f"/api/v1/bins/{stored[0].bin_id}/export")
+
+
+@pytest.mark.anyio
+async def test_given_reply_dialog_when_user_edits_and_saves_then_bin_replies_that_way(
+    database: Database, services: Settings
+) -> None:
+    """Given the reply dialog, when the user sets 418, a header and a body, and saves, then the bin keeps them."""
+    # Given
+    inspector, stored = await open_bin(database, services)
+    await inspector.open_reply()
+    # When
+    inspector.set_reply_status("418")
+    inspector.set_reply_content_type("text/plain")
+    inspector.set_reply_delay("5")
+    inspector.add_reply_header()
+    inspector.add_reply_header()
+    inspector.set_reply_header_name(0, "X-Tea")
+    inspector.set_reply_header_value(0, "yes")
+    inspector.remove_reply_header(1)
+    inspector.set_reply_custom_body(True)
+    inspector.set_reply_body("short and stout")
+    saved = await inspector.save_reply()
+    # Then
+    assert "Saved the reply settings" in args_text(saved)
+    assert not inspector.reply_open
+    bin_id = inspector.export_url.split("/")[-2]
+    assert (await runtime.bin_service.get(bin_id)).reply == ReplyConfig(
+        status=418, content_type="text/plain", headers=(("X-Tea", "yes"),), body="short and stout", delay_ms=5
+    )
+    assert inspector.reply.headers == [PairView(index=0, name="X-Tea", value="yes")]
+    assert stored == []
+
+
+@pytest.mark.anyio
+async def test_given_reply_dialog_when_settings_break_a_rule_then_dialog_shows_why_and_stays(
+    database: Database, services: Settings
+) -> None:
+    """Given the reply dialog, when the status is not a number or a header is banned, then the error shows."""
+    # Given
+    inspector, _ = await open_bin(database, services)
+    await inspector.open_reply()
+    # When
+    inspector.set_reply_status("abc")
+    not_number = (await inspector.save_reply(), inspector.reply_error)
+    inspector.set_reply_status("200")
+    inspector.add_reply_header()
+    inspector.set_reply_header_name(0, "Set-Cookie")
+    banned = (await inspector.save_reply(), inspector.reply_error)
+    inspector.default_reply()
+    # Then
+    assert not_number == (None, "The status and the delay must be whole numbers.")
+    assert banned == (None, "A reply may not set Set-Cookie.")
+    assert inspector.reply_open
+    assert (inspector.reply, inspector.reply_error) == (ReplyForm(), "")
+    inspector.set_reply_open(False)
+    assert not inspector.reply_open
+
+
+@pytest.mark.anyio
+async def test_given_bin_gone_when_reply_dialog_opens_or_saves_then_page_shows_it_deleted(
+    database: Database, services: Settings
+) -> None:
+    """Given a bin deleted elsewhere, when the dialog opens or saves, then the page shows the bin as deleted."""
+    # Given
+    inspector, _ = await open_bin(database, services)
+    bin_id = inspector.export_url.split("/")[-2]
+    await runtime.bin_service.delete(bin_id)
+    # When
+    saved = await inspector.save_reply()
+    after_save = (inspector.found, inspector.deleted)
+    await inspector.open_reply()
+    # Then
+    assert saved is None
+    assert after_save == (False, True)
+    assert not inspector.reply_open
+    assert "gone" in args_text(await inspector._clear())  # noqa: SLF001  # pylint: disable=protected-access
+
+
+@pytest.mark.anyio
+async def test_given_local_replay_when_user_sends_then_result_shows(
+    database: Database, monkeypatch: pytest.MonkeyPatch, services: Settings, echo_server: EchoServer
+) -> None:
+    """Given `local` replay mode, when the user replays to an echo server, then the tab shows its reply."""
+    # Given
+    settings = replace(services, replay_mode=ReplayMode.LOCAL)
+    monkeypatch.setattr(runtime, "settings", settings)
+    monkeypatch.setattr(runtime, "replay_service", ReplayService(RequestService(database), settings))
+    inspector, _ = await open_bin(database, settings, INCOMING)
+    inspector.set_replay_target(f"{echo_server.url}/hook")
+    inspector.set_replay_keep_query(False)
+    # When
+    steps = [step async for step in inspector.send_replay()]
+    # Then
+    assert inspector.replay_local
+    assert len(steps) == 1
+    assert (inspector.replay_result.status, inspector.replay_result.body_kind) == (201, "json")
+    assert (inspector.replaying, inspector.replay_error) == (False, "")
+    assert echo_server.received[0].path == "/hook"
+
+
+@pytest.mark.anyio
+async def test_given_restricted_replay_when_user_sends_to_loopback_then_error_shows(
+    database: Database, services: Settings, echo_server: EchoServer
+) -> None:
+    """Given `restricted` mode, when the user replays to 127.0.0.1, then the tab shows that the address is refused."""
+    # Given
+    inspector, _ = await open_bin(database, services, INCOMING)
+    inspector.set_replay_target(f"{echo_server.url}/hook")
+    # When
+    _ = [step async for step in inspector.send_replay()]
+    # Then
+    assert not inspector.replay_local
+    assert inspector.replay_error == "Target address not allowed."
+    assert inspector.replay_result == ReplayView()
+    assert echo_server.received == []
+
+
+@pytest.mark.anyio
+async def test_given_remembered_bins_when_one_is_gone_then_home_forgets_it(
+    database: Database, services: Settings
+) -> None:
+    """Given two remembered bins, one deleted, when the home page loads, then only the other is listed and kept."""
+    # Given
+    bins = BinService(database, services)
+    kept = await bins.create("kept")
+    gone = await bins.create("gone")
+    await bins.delete(gone.id)
+    home = make_state(HomeState)
+    home.known_bins = json.dumps([gone.id, kept.id])
+    # When
+    await home.load()
+    # Then
+    assert [row.id for row in home.bins] == [kept.id]
+    assert json.loads(home.known_bins) == [kept.id]
+    assert home.bins[0].expires_at == kept.expires_at.isoformat()

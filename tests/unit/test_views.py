@@ -5,16 +5,22 @@ from dataclasses import replace
 
 import pytest
 
-from reflex_fastapi_webhook_studio.domain import BinSummary, RequestSummary
+from reflex_fastapi_webhook_studio.domain import BinSummary, ReplayResult, ReplyConfig, RequestSummary
 from reflex_fastapi_webhook_studio.ui.views import (
+    REPLAY_SHOWN_BYTES,
     PairView,
+    ReplyForm,
     bin_row,
     body_view,
     capture_url,
     curl_example,
+    forget,
     known_ids,
     parse_bin_id,
     remember,
+    replay_view,
+    reply_config,
+    reply_form,
     request_row,
     request_view,
 )
@@ -192,3 +198,86 @@ def test_given_request_with_secret_header_when_viewed_then_only_that_header_is_m
     ]
     assert [(pair.name, pair.value) for pair in view.query_params] == [("x", "1"), ("x", "2")]
     assert (view.target, view.body_kind, view.content_type) == ("/github?x=1&x=2", "json", "application/json")
+
+
+def test_given_known_ids_when_some_are_forgotten_then_the_rest_keep_their_order() -> None:
+    """Given remembered ids, when some are forgotten, then the rest stay in order."""
+    # Given
+    stored = json.dumps([BIN_ID, "bad", OTHER_ID])
+    # When
+    kept = forget(stored, {BIN_ID})
+    # Then
+    assert json.loads(kept) == [OTHER_ID]
+
+
+def make_result(body: bytes, content_type: str = "application/json", *, truncated: bool = False) -> ReplayResult:
+    """Build a replay result.
+
+    Args:
+        body: The reply body.
+        content_type: The reply content type.
+        truncated: Whether the read stopped at the cap.
+
+    Returns:
+        The result.
+    """
+    return ReplayResult(
+        status=201,
+        reason="Created",
+        elapsed_ms=12,
+        headers=(("Content-Type", content_type), ("X-Echo", "yes")),
+        body=body,
+        body_truncated=truncated,
+    )
+
+
+@pytest.mark.parametrize(
+    ("result", "kind", "text", "cut"),
+    [
+        (make_result(b'{"a":1}'), "json", '{\n  "a": 1\n}', False),
+        (make_result(b"a=1&b=2", "application/x-www-form-urlencoded"), "text", "a=1&b=2", False),
+        (make_result(b"\xff\xfe", "application/octet-stream"), "binary", "", False),
+        (make_result(b""), "empty", "", False),
+        (make_result(b"a" * (REPLAY_SHOWN_BYTES - 1) + "é".encode(), "text/plain"), "text", "a" * 65535, True),
+        (make_result(b"ok", "text/plain", truncated=True), "text", "ok", True),
+    ],
+)
+def test_given_replay_result_when_viewed_then_body_shows_as_text_json_or_binary(
+    result: ReplayResult,
+    kind: str,
+    text: str,
+    cut: bool,  # noqa: FBT001
+) -> None:
+    """Given a replay result, when viewed, then the body shows by kind, and a cut keeps whole characters."""
+    # Given
+    replayed = result
+    # When
+    view = replay_view(replayed)
+    # Then
+    assert (view.body_kind, view.body_text, view.body_cut) == (kind, text, cut)
+    assert (view.status, view.reason, view.elapsed_ms, view.body_size) == (201, "Created", 12, len(replayed.body))
+    assert [(pair.name, pair.value) for pair in view.headers][1] == ("X-Echo", "yes")
+
+
+def test_given_reply_settings_when_shown_and_read_back_then_they_round_trip() -> None:
+    """Given a bin's reply settings, when the dialog is filled and read back, then the settings are the same."""
+    # Given
+    reply = ReplyConfig(status=418, content_type="text/plain", headers=(("X-Tea", "yes"),), body="short", delay_ms=250)
+    # When
+    form = reply_form(reply)
+    with_blank_row = replace(form, headers=[*form.headers, PairView(index=1, name="  ", value="x")])
+    # Then
+    assert (form.status, form.custom_body, form.delay_ms) == ("418", True, "250")
+    assert reply_config(with_blank_row) == reply
+    assert reply_config(ReplyForm()) == ReplyConfig()
+
+
+@pytest.mark.parametrize(("status", "delay"), [("abc", "0"), ("200", "-5"), ("", "0")])
+def test_given_non_numbers_when_reply_is_read_then_a_message_comes_back(status: str, delay: str) -> None:
+    """Given a status or delay that is not a whole number, when the dialog is read, then it says so."""
+    # Given
+    form = ReplyForm(status=status, delay_ms=delay)
+    # When
+    result = reply_config(form)
+    # Then
+    assert result == "The status and the delay must be whole numbers."

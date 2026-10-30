@@ -66,6 +66,8 @@ class InspectorState(rx.State):  # pylint: disable=too-many-instance-attributes,
     """The inspector page state."""
 
     found: rx.Field[bool] = rx.field(default=True)
+    loading: rx.Field[bool] = rx.field(default=True)
+    """Whether the page still waits for its first load."""
     deleted: rx.Field[bool] = rx.field(default=False)
     """Whether the bin was deleted while the page was open."""
     label: rx.Field[str] = rx.field("")
@@ -211,6 +213,7 @@ class InspectorState(rx.State):  # pylint: disable=too-many-instance-attributes,
     async def _load(self) -> None:
         if await self._load_bin():
             await self._reload_list()
+        self.loading = False
 
     async def _load_bin(self) -> bool:
         bin_id = self._bin_id()
@@ -228,7 +231,7 @@ class InspectorState(rx.State):  # pylint: disable=too-many-instance-attributes,
         self.replay_local = runtime.settings.replay_mode is ReplayMode.LOCAL
         return True
 
-    async def _reload_list(self, keep: int = PAGE_SIZE) -> None:
+    async def _reload_list(self, keep: int = 0) -> None:
         bin_id, where = self._bin_id(), self._filter()
         limit = min(max(keep, PAGE_SIZE), runtime.settings.max_requests_per_bin)
         try:
@@ -375,14 +378,6 @@ class InspectorState(rx.State):  # pylint: disable=too-many-instance-attributes,
         except BinNotFoundError, RequestNotFoundError:
             return rx.toast.error(GONE)
         return [rx.set_clipboard(replay_as_curl(request, self.capture_url)), rx.toast.success("Copied as curl.")]
-
-    def export(self) -> EventSpec:
-        """Download the bin and every request as one JSON file.
-
-        Returns:
-            The download.
-        """
-        return rx.download(url=self.export_url)
 
     async def ask_delete_request(self) -> EventSpec | list[EventSpec] | None:
         """Delete the request on show, after the user confirms unless they chose not to be asked.

@@ -377,12 +377,18 @@ def _bin_actions() -> rx.Component:
             custom_attrs={"data-testid": "reply-settings"},
         ),
         rx.button(
-            Icon.create("file-down", size=16),
-            "Export",
-            on_click=InspectorState.export,
+            rx.el.a(
+                Icon.create("file-down", size=16),
+                "Export",
+                href=InspectorState.export_url,
+                download="",
+                # rx.el.a is React Router's Link, which would route a same-origin click itself and skip the download.
+                reload_document=True,
+                custom_attrs={"data-testid": "export"},
+            ),
+            as_child=True,
             variant="soft",
             size="1",
-            custom_attrs={"data-testid": "export"},
         ),
         rx.button(
             Icon.create("eraser", size=16),
@@ -625,16 +631,20 @@ def inspector() -> rx.Component:
     """
     return rx.box(
         rx.cond(
-            InspectorState.found,
-            _bin_view(),
-            rx.vstack(
-                top_bar(),
-                rx.cond(
-                    InspectorState.deleted,
-                    rx.callout("This bin was deleted.", icon="info", color_scheme="gray"),
-                    rx.callout("No bin has this id.", icon="triangle_alert", color_scheme="red"),
+            InspectorState.loading,
+            rx.center(rx.spinner(size="3", custom_attrs={"data-testid": "loading"}), padding="4rem"),
+            rx.cond(
+                InspectorState.found,
+                _bin_view(),
+                rx.vstack(
+                    top_bar(),
+                    rx.cond(
+                        InspectorState.deleted,
+                        rx.callout("This bin was deleted.", icon="info", color_scheme="gray"),
+                        rx.callout("No bin has this id.", icon="triangle_alert", color_scheme="red"),
+                    ),
+                    rx.link("Back to the home page", href="/"),
                 ),
-                rx.link("Back to the home page", href="/"),
             ),
         ),
         padding="1rem 1.5rem",

@@ -15,6 +15,29 @@ def test_given_pages_when_built_then_each_is_a_component_with_its_test_ids() -> 
     # Then
     assert all(isinstance(component, rx.Component) for component in built.values())
     assert "new-bin" in str(built["home"].render())
+    assert '"data-testid":"loading"' in str(built["home"].render())
     rendered = str(built["inspector"].render())
-    for test_id in ("capture-url", "request-row", "masked-header", "body-tab", "empty-state"):
+    test_ids = (
+        "capture-url",
+        "request-row",
+        "masked-header",
+        "body-tab",
+        "empty-state",
+        "method-filter",
+        "search",
+        "load-older",
+        "delete-request",
+        "confirm-delete",
+        "dont-ask",
+        "export",
+        "reply-settings",
+        "reply-save",
+        "replay-tab",
+        "replay-send",
+    )
+    for test_id in test_ids:
         assert test_id in rendered
+    assert "VisibilitySentinel" in rendered
+    assert '"data-testid":"loading"' in rendered
+    # Without it React Router routes the same-origin Export click itself and no download starts.
+    assert "reloadDocument" in rendered
