@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from reflex_fastapi_webhook_studio.settings import Settings
 
 CAPTURE_PREFIX = "/api/webhook"
+LOOPBACK = frozenset({"127.0.0.1", "::1"})
 # A capture reply may hold anything, so the browser must treat it as a sandboxed, opaque origin.
 SAFETY_HEADERS = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
 
@@ -82,6 +83,23 @@ async def read_body(request: Request, limit: int) -> tuple[bytes, int, bool]:
     return b"".join(chunks), size, False
 
 
+def client_address(request: Request) -> str | None:
+    """Find the sender's address.
+
+    Behind a proxy on the same machine, such as the Caddy in the Docker image, the peer is the proxy, so the last
+    `X-Forwarded-For` entry (the one that proxy added) names the sender. From any other peer the header is ignored.
+
+    Args:
+        request: The request.
+
+    Returns:
+        The address, or None if unknown.
+    """
+    peer = None if request.client is None else request.client.host
+    forwarded = request.headers.get("x-forwarded-for", "").rsplit(",", 1)[-1].strip()
+    return forwarded if peer in LOOPBACK and forwarded else peer
+
+
 def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncated: bool) -> IncomingRequest:
     """Collect what the app stores about a request.
 
@@ -104,7 +122,7 @@ def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncate
         body_size=size,
         body_truncated=truncated,
         content_type=request.headers.get("content-type"),
-        remote_addr=None if request.client is None else request.client.host,
+        remote_addr=client_address(request),
         http_version=request.scope.get("http_version", "1.1"),
     )
 
