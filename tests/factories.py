@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from redis.asyncio import Redis
 
+    from reflex_fastapi_webhook_studio.bus.base import EventBus
     from reflex_fastapi_webhook_studio.db.engine import Database
 
 NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
@@ -23,7 +24,12 @@ NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 
 @asynccontextmanager
 async def api_client(
-    database: Database, settings: Settings | None = None, *, redis: Redis | None = None
+    database: Database,
+    settings: Settings | None = None,
+    *,
+    redis: Redis | None = None,
+    bus: EventBus | None = None,
+    client_host: str = "203.0.113.7",
 ) -> AsyncIterator[AsyncClient]:
     """Open an HTTP client that calls the FastAPI app in process.
 
@@ -31,12 +37,14 @@ async def api_client(
         database: The test database.
         settings: The settings; the defaults when None.
         redis: A Redis client for health to check, if any.
+        bus: The event bus the services publish on, if a test listens.
+        client_host: The address the app sees the requests come from.
 
     Yields:
         The client.
     """
-    api = create_api(settings or Settings(), database, redis=redis)
-    transport = ASGITransport(app=api, client=("203.0.113.7", 50000))
+    api = create_api(settings or Settings(), database, redis=redis, bus=bus)
+    transport = ASGITransport(app=api, client=(client_host, 50000))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 

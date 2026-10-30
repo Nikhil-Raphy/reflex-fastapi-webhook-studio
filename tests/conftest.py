@@ -12,9 +12,10 @@ from alembic import command
 from alembic.config import Config
 
 from reflex_fastapi_webhook_studio.db.engine import Database
+from tests.echo import EchoServer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 TEST_DATABASE_URL = "WEBHOOK_STUDIO_TEST_DATABASE_URL"
@@ -81,3 +82,14 @@ async def database(database_url: str) -> AsyncIterator[Database]:
     db = Database(database_url)
     yield db
     await db.engine.dispose()
+
+
+@pytest.fixture
+def echo_server() -> Iterator[EchoServer]:
+    """Run a local HTTP server that records each request it gets.
+
+    Yields:
+        The running server.
+    """
+    with EchoServer() as server:
+        yield server
