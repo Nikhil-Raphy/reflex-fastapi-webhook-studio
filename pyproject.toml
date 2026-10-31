@@ -1,6 +1,6 @@
 [project]
 name = "reflex-fastapi-webhook-studio"
-version = "0.0.0"
+version = "0.1.0"
 description = "Catch, inspect and replay webhooks and HTTP requests."
 readme = "README.md"
 authors = [{ name = "Nikhil Raphy" }]
