@@ -1,18 +1,22 @@
-"""Capture routes: store any request sent to a bin and send a reply."""
+"""Capture routes: store any request sent to a bin and send the bin's reply."""
 
+import asyncio
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
 from reflex_fastapi_webhook_studio.api.problems import problem
 from reflex_fastapi_webhook_studio.api.schemas import CaptureOut
-from reflex_fastapi_webhook_studio.domain import BinNotFoundError, HttpMethod, IncomingRequest, is_bin_id
+from reflex_fastapi_webhook_studio.domain import NO_BODY_STATUSES, BinNotFoundError, HttpMethod, IncomingRequest
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+    from reflex_fastapi_webhook_studio.domain import ReplyConfig
+    from reflex_fastapi_webhook_studio.services.bins import BinService
     from reflex_fastapi_webhook_studio.services.capture import CaptureService
     from reflex_fastapi_webhook_studio.settings import Settings
 
@@ -105,11 +109,39 @@ def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncate
     )
 
 
-def capture_router(capture: CaptureService, settings: Settings) -> APIRouter:
+def bin_reply(reply: ReplyConfig, request_id: UUID, *, head: bool) -> Response:
+    """Build the reply a bin's settings ask for.
+
+    Args:
+        reply: The bin's reply settings.
+        request_id: The id of the stored request, for the default JSON body.
+        head: Whether the request was HEAD, whose reply has no body.
+
+    Returns:
+        The reply.
+    """
+    if reply.status in NO_BODY_STATUSES:
+        content, content_type = b"", None
+    elif reply.body is None:
+        content = CaptureOut(ok=True, request_id=request_id).model_dump_json().encode()
+        content_type = reply.content_type or "application/json"
+    else:
+        content, content_type = reply.body.encode(), reply.content_type or "text/plain; charset=utf-8"
+    response = Response(content=b"" if head else content, status_code=reply.status)
+    if content_type is not None:
+        # Set as given; Starlette would add a charset to a text media type.
+        response.headers["content-type"] = content_type
+    for name, value in reply.headers:
+        response.headers.append(name, value)
+    return response
+
+
+def capture_router(capture: CaptureService, bins: BinService, settings: Settings) -> APIRouter:
     """Build the capture routes, for the bin URL itself and any path under it.
 
     Args:
         capture: The capture service.
+        bins: The bin service, which gives each bin's reply settings.
         settings: The app settings.
 
     Returns:
@@ -118,14 +150,16 @@ def capture_router(capture: CaptureService, settings: Settings) -> APIRouter:
     router = APIRouter(prefix=CAPTURE_PREFIX, tags=["capture"])
 
     async def capture_request(request: Request, bin_id: str, path: str = "") -> Response:
-        """Store the request in the bin and reply with its id."""
-        if not is_bin_id(bin_id):
+        """Store the request in the bin, then send the bin's reply: by default 200 with the request id."""
+        try:
+            reply = (await bins.get(bin_id)).reply
+        except BinNotFoundError:
             return problem(HTTPStatus.NOT_FOUND, "No bin has this id.")
         body, size, truncated = await read_body(request, settings.max_body_bytes)
         requested_method = request.headers.get("access-control-request-method")
         preflight = settings.cors_enabled and request.method == HttpMethod.OPTIONS and requested_method is not None
         reply_status = (
-            HTTPStatus.REQUEST_ENTITY_TOO_LARGE if truncated else HTTPStatus.NO_CONTENT if preflight else HTTPStatus.OK
+            HTTPStatus.REQUEST_ENTITY_TOO_LARGE if truncated else HTTPStatus.NO_CONTENT if preflight else reply.status
         )
         try:
             stored = await capture.capture(
@@ -142,9 +176,10 @@ def capture_router(capture: CaptureService, settings: Settings) -> APIRouter:
                 "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", ""),
             }
             return Response(status_code=reply_status, headers=headers)
-        if request.method == HttpMethod.HEAD:
-            return Response(status_code=reply_status, media_type="application/json")
-        return JSONResponse(CaptureOut(ok=True, request_id=stored.id).model_dump(mode="json"))
+        # The event is out already, so open inspectors show the request while the sender waits.
+        if reply.delay_ms:
+            await asyncio.sleep(reply.delay_ms / 1000)
+        return bin_reply(reply, stored.id, head=request.method == HttpMethod.HEAD)
 
     for route, kind in (("/{bin_id}", "bin"), ("/{bin_id}/{path:path}", "sub_path")):
         for method in HttpMethod:

@@ -284,7 +284,7 @@ async def test_given_request_on_show_when_user_copies_and_downloads_then_events_
 async def test_given_open_inspector_when_bin_events_arrive_then_list_and_label_follow(
     database: Database, services: Settings
 ) -> None:
-    """Given an empty open inspector, when bin events arrive, then requests join once, the label and resync follow."""
+    """Given an empty open inspector, when bin events arrive, then requests join once, and the label reloads."""
     # Given
     bin_ = await BinService(database, services).create("old")
     inspector = make_state(InspectorState, f"/bins/{bin_.id}")
@@ -296,11 +296,12 @@ async def test_given_open_inspector_when_bin_events_arrive_then_list_and_label_f
     # When
     await apply(captured)
     await apply(captured)
-    await apply(BinEvent(type=EventType.BIN_UPDATED, bin_id=bin_.id, label=None))
-    labelled = inspector.label
     await runtime.bin_service.rename(bin_.id, "renamed")
+    await apply(BinEvent(type=EventType.BIN_UPDATED, bin_id=bin_.id, label="renamed"))
+    labelled = inspector.label
+    await runtime.bin_service.rename(bin_.id, None)
     await apply(BinEvent(type=EventType.RESYNC, bin_id=bin_.id))
     # Then
     assert [row.id for row in inspector.requests] == [str(stored.id)]
     assert inspector.detail.id == str(stored.id)
-    assert (labelled, inspector.label) == ("No label", "renamed")
+    assert (labelled, inspector.label) == ("renamed", "No label")

@@ -146,7 +146,9 @@ def test_given_known_ids_when_bin_is_remembered_then_it_goes_first_once_within_l
 def test_given_summaries_when_rows_are_built_then_they_hold_display_values() -> None:
     """Given bin and request summaries, when rows are built, then they hold the link, short id, label and target."""
     # Given
-    bin_summary = BinSummary(id=BIN_ID, label=None, created_at=NOW, last_activity_at=NOW, request_count=3)
+    bin_summary = BinSummary(
+        id=BIN_ID, label=None, created_at=NOW, last_activity_at=NOW, expires_at=NOW, request_count=3
+    )
     request = make_request(BIN_ID)
     summary = RequestSummary(
         id=request.id,

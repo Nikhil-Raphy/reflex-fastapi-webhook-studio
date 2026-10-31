@@ -16,8 +16,11 @@ from reflex_fastapi_webhook_studio.api.capture import CaptureReplyHeaders, captu
 from reflex_fastapi_webhook_studio.api.problems import add_problem_handlers, problem
 from reflex_fastapi_webhook_studio.api.requests import requests_router
 from reflex_fastapi_webhook_studio.api.schemas import HealthOut
+from reflex_fastapi_webhook_studio.security.ssrf import resolve
 from reflex_fastapi_webhook_studio.services.bins import BinService
 from reflex_fastapi_webhook_studio.services.capture import CaptureService
+from reflex_fastapi_webhook_studio.services.export import ExportService
+from reflex_fastapi_webhook_studio.services.replay import ReplayService
 from reflex_fastapi_webhook_studio.services.requests import RequestService
 
 if TYPE_CHECKING:
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
 
     from reflex_fastapi_webhook_studio.bus.base import EventBus
     from reflex_fastapi_webhook_studio.db.engine import Database
+    from reflex_fastapi_webhook_studio.security.ssrf import Resolver
     from reflex_fastapi_webhook_studio.settings import Settings
 
 API_PREFIX = "/api"
@@ -77,7 +81,12 @@ def health_router(database: Database, redis: Redis | None = None) -> APIRouter:
 
 
 def create_api(
-    settings: Settings, database: Database, *, bus: EventBus | None = None, redis: Redis | None = None
+    settings: Settings,
+    database: Database,
+    *,
+    bus: EventBus | None = None,
+    redis: Redis | None = None,
+    resolver: Resolver = resolve,
 ) -> FastAPI:
     """Build the FastAPI app with every route.
 
@@ -86,6 +95,7 @@ def create_api(
         database: The database.
         bus: The event bus the services publish on; one with no subscribers when None.
         redis: The Redis client that health checks, when the app uses Redis.
+        resolver: Looks up replay target addresses; tests pass a fake one.
 
     Returns:
         The FastAPI app.
@@ -98,12 +108,15 @@ def create_api(
         swagger_ui_oauth2_redirect_url=None,
         openapi_url="/api/openapi.json",
     )
+    bins = BinService(database, settings, bus=bus)
+    requests = RequestService(database, bus=bus)
+    replays = ReplayService(requests, settings, resolver=resolver)
     add_problem_handlers(api)
     api.add_middleware(CaptureReplyHeaders, cors_enabled=settings.cors_enabled)
     api.include_router(health_router(database, redis))
-    api.include_router(bins_router(BinService(database, settings, bus=bus)))
-    api.include_router(requests_router(RequestService(database)))
-    api.include_router(capture_router(CaptureService(database, settings, bus=bus), settings))
+    api.include_router(bins_router(bins, ExportService(database)))
+    api.include_router(requests_router(requests, replays, settings))
+    api.include_router(capture_router(CaptureService(database, settings, bus=bus), bins, settings))
     return api
 
 

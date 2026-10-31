@@ -2,16 +2,26 @@
 
 import json
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl
 
-from reflex_fastapi_webhook_studio.domain import BinSummary, CapturedRequest, RequestSummary, is_bin_id
+from reflex_fastapi_webhook_studio.domain import (
+    BinSummary,
+    CapturedRequest,
+    ReplayResult,
+    ReplyConfig,
+    RequestSummary,
+    is_bin_id,
+)
 from reflex_fastapi_webhook_studio.security.masking import is_secret_header
 
 _BIN_ID_IN_TEXT = re.compile(r"(?:/api/webhook/|/bins/)([A-Za-z0-9_-]{22})(?:[/?#]|$)")
 _JSON_STARTS = ("{", "[")
 SHORT_ID_LENGTH = 6
 NO_LABEL = "No label"
+REPLAY_SHOWN_BYTES = 65_536
+"""The most replay reply bytes the Replay tab shows."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -25,6 +35,7 @@ class BinRowView:
         label: The label, or "No label".
         request_count: How many requests the bin holds.
         last_activity_at: When the bin last caught a request, as ISO 8601.
+        expires_at: When the bin may be deleted, as ISO 8601.
     """
 
     id: str
@@ -33,6 +44,7 @@ class BinRowView:
     label: str
     request_count: int
     last_activity_at: str
+    expires_at: str
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -110,6 +122,136 @@ class RequestView:
     form_fields: list[PairView] = field(default_factory=list)
 
 
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ReplayView:
+    """What a replay target sent back, for the Replay tab.
+
+    Attributes:
+        status: The status code; 0 when no replay has run.
+        reason: The reason phrase.
+        elapsed_ms: How long the replay took.
+        headers: The reply headers.
+        body_size: The reply bytes read.
+        body_kind: How to show the body: empty, json, form, text or binary.
+        body_text: The text to show, cut to the first 64 KiB.
+        body_cut: Whether the tab shows only part of the body.
+    """
+
+    status: int = 0
+    reason: str = ""
+    elapsed_ms: int = 0
+    headers: list[PairView] = field(default_factory=list)
+    body_size: int = 0
+    body_kind: str = "empty"
+    body_text: str = ""
+    body_cut: bool = False
+
+
+def replay_view(result: ReplayResult) -> ReplayView:
+    """Build the record behind the Replay tab's result.
+
+    Args:
+        result: The replay result.
+
+    Returns:
+        The record.
+    """
+    content_type = next((value for name, value in result.headers if name.lower() == "content-type"), None)
+    cut = result.body_truncated or len(result.body) > REPLAY_SHOWN_BYTES
+    shown = _whole_characters(result.body[:REPLAY_SHOWN_BYTES]) if cut else result.body
+    kind, text, _ = body_view(shown, content_type, truncated=False)
+    if kind == "form":
+        kind, text = "text", shown.decode()
+    return ReplayView(
+        status=result.status,
+        reason=result.reason,
+        elapsed_ms=result.elapsed_ms,
+        headers=[PairView(index=index, name=name, value=value) for index, (name, value) in enumerate(result.headers)],
+        body_size=len(result.body),
+        body_kind=kind,
+        body_text=text,
+        body_cut=cut,
+    )
+
+
+def _whole_characters(data: bytes) -> bytes:
+    """Drop a UTF-8 character that a cut split at the end, so cut text still reads as text.
+
+    Args:
+        data: Bytes cut at some length.
+
+    Returns:
+        The bytes, less up to three at the end when that makes them valid UTF-8.
+    """
+    for end in range(len(data), max(len(data) - 4, -1), -1):
+        try:
+            data[:end].decode()
+        except UnicodeDecodeError:
+            continue
+        return data[:end]
+    return data
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ReplyForm:
+    """The reply settings dialog's fields, as the user types them.
+
+    Attributes:
+        status: The status code.
+        content_type: The content type; empty for the default.
+        headers: The extra headers.
+        custom_body: Whether to send `body` instead of the default JSON body.
+        body: The body text.
+        delay_ms: The delay in milliseconds.
+    """
+
+    status: str = "200"
+    content_type: str = ""
+    headers: list[PairView] = field(default_factory=list)
+    custom_body: bool = False
+    body: str = ""
+    delay_ms: str = "0"
+
+
+def reply_form(reply: ReplyConfig) -> ReplyForm:
+    """Fill the reply settings dialog from a bin's settings.
+
+    Args:
+        reply: The bin's reply settings.
+
+    Returns:
+        The dialog fields.
+    """
+    return ReplyForm(
+        status=str(reply.status),
+        content_type=reply.content_type or "",
+        headers=[PairView(index=index, name=name, value=value) for index, (name, value) in enumerate(reply.headers)],
+        custom_body=reply.body is not None,
+        body=reply.body or "",
+        delay_ms=str(reply.delay_ms),
+    )
+
+
+def reply_config(form: ReplyForm) -> ReplyConfig | str:
+    """Read reply settings from the dialog's fields.
+
+    Args:
+        form: The dialog fields.
+
+    Returns:
+        The settings, or a message if the status or delay is not a whole number.
+    """
+    if not form.status.strip().isdigit() or not form.delay_ms.strip().isdigit():
+        return "The status and the delay must be whole numbers."
+    return ReplyConfig(
+        status=int(form.status),
+        content_type=form.content_type.strip() or None,
+        headers=tuple((pair.name.strip(), pair.value) for pair in form.headers if pair.name.strip()),
+        body=form.body if form.custom_body else None,
+        delay_ms=int(form.delay_ms),
+    )
+
+
 def bin_row(summary: BinSummary) -> BinRowView:
     """Build a home page row.
 
@@ -126,6 +268,7 @@ def bin_row(summary: BinSummary) -> BinRowView:
         label=summary.label or NO_LABEL,
         request_count=summary.request_count,
         last_activity_at=summary.last_activity_at.isoformat(),
+        expires_at=summary.expires_at.isoformat(),
     )
 
 
@@ -288,3 +431,16 @@ def remember(stored: str, bin_id: str, *, limit: int) -> str:
     """
     ids = [bin_id, *(value for value in known_ids(stored) if value != bin_id)]
     return json.dumps(ids[:limit])
+
+
+def forget(stored: str, bin_ids: Collection[str]) -> str:
+    """Drop bin ids from the list a browser remembers.
+
+    Args:
+        stored: The JSON list kept in the browser's local storage.
+        bin_ids: The ids to drop.
+
+    Returns:
+        The new JSON list.
+    """
+    return json.dumps([value for value in known_ids(stored) if value not in bin_ids])

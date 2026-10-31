@@ -2,16 +2,19 @@
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import ColumnElement, Select, Text, cast, delete, func, or_, select, update
 from sqlmodel import col
 
 from reflex_fastapi_webhook_studio.db.models import BinRow, CapturedRequestRow
 from reflex_fastapi_webhook_studio.domain import (
+    EVERY_REQUEST,
     Bin,
     BinSummary,
     CapturedRequest,
     HttpMethod,
     NameValuePairs,
+    ReplyConfig,
+    RequestFilter,
     RequestSummary,
 )
 
@@ -37,6 +40,11 @@ async def add_bin(session: AsyncSession, bin_: Bin) -> None:
             created_at=bin_.created_at,
             last_activity_at=bin_.last_activity_at,
             expires_at=bin_.expires_at,
+            reply_status=bin_.reply.status,
+            reply_content_type=bin_.reply.content_type,
+            reply_headers=[list(pair) for pair in bin_.reply.headers],
+            reply_body=bin_.reply.body,
+            reply_delay_ms=bin_.reply.delay_ms,
         )
     )
     await session.flush()
@@ -88,6 +96,7 @@ async def list_bins(session: AsyncSession, bin_ids: Collection[str] | None = Non
             label=row.label,
             created_at=row.created_at,
             last_activity_at=row.last_activity_at,
+            expires_at=row.expires_at,
             request_count=row.request_count,
         )
         for row in rows
@@ -113,6 +122,29 @@ async def set_label(session: AsyncSession, bin_id: str, label: str | None) -> Bi
     return _bin(row)
 
 
+async def set_reply(session: AsyncSession, bin_id: str, reply: ReplyConfig) -> Bin | None:
+    """Change what a bin sends back to senders.
+
+    Args:
+        session: An open session; the caller commits.
+        bin_id: The bin id.
+        reply: The new reply settings.
+
+    Returns:
+        The changed bin, or None if no bin has that id.
+    """
+    row = await session.get(BinRow, bin_id)
+    if row is None:
+        return None
+    row.reply_status = reply.status
+    row.reply_content_type = reply.content_type
+    row.reply_headers = [list(pair) for pair in reply.headers]
+    row.reply_body = reply.body
+    row.reply_delay_ms = reply.delay_ms
+    await session.flush()
+    return _bin(row)
+
+
 async def touch_bin(session: AsyncSession, bin_id: str, *, at: datetime, expires_at: datetime) -> None:
     """Record activity on a bin and push its expiry out.
 
@@ -125,6 +157,34 @@ async def touch_bin(session: AsyncSession, bin_id: str, *, at: datetime, expires
     await session.execute(
         update(BinRow).where(col(BinRow.id) == bin_id).values(last_activity_at=at, expires_at=expires_at)
     )
+
+
+async def delete_bin(session: AsyncSession, bin_id: str) -> bool:
+    """Delete a bin; the database deletes its requests with it.
+
+    Args:
+        session: An open session; the caller commits.
+        bin_id: The bin id.
+
+    Returns:
+        Whether a bin had that id.
+    """
+    deleted = await session.execute(delete(BinRow).where(col(BinRow.id) == bin_id).returning(col(BinRow.id)))
+    return deleted.scalar_one_or_none() is not None
+
+
+async def delete_expired_bins(session: AsyncSession, now: datetime) -> list[str]:
+    """Delete every bin whose expiry has passed, with its requests.
+
+    Args:
+        session: An open session; the caller commits.
+        now: The current time.
+
+    Returns:
+        The ids of the deleted bins.
+    """
+    deleted = await session.execute(delete(BinRow).where(col(BinRow.expires_at) <= now).returning(col(BinRow.id)))
+    return list(deleted.scalars())
 
 
 async def add_request(session: AsyncSession, request: CapturedRequest) -> None:
@@ -179,33 +239,40 @@ async def trim_requests(session: AsyncSession, bin_id: str, *, keep: int) -> Non
     )
 
 
-async def list_requests(session: AsyncSession, bin_id: str, *, limit: int) -> list[RequestSummary]:
-    """List the newest requests of a bin, newest first.
+async def list_requests(
+    session: AsyncSession,
+    bin_id: str,
+    *,
+    limit: int,
+    where: RequestFilter = EVERY_REQUEST,
+    before: UUID | None = None,
+) -> list[RequestSummary]:
+    """List a bin's requests that match a filter, newest first.
 
     Args:
         session: An open session.
         bin_id: The bin id.
         limit: The most requests to return.
+        where: Which requests to list.
+        before: Only requests older than the one with this id, to read the next page.
 
     Returns:
         Short forms of the requests.
     """
-    rows = await session.execute(
-        select(
-            col(CapturedRequestRow.id),
-            col(CapturedRequestRow.received_at),
-            col(CapturedRequestRow.method),
-            col(CapturedRequestRow.path),
-            col(CapturedRequestRow.query_string),
-            col(CapturedRequestRow.body_size),
-            col(CapturedRequestRow.body_truncated),
-            col(CapturedRequestRow.content_type),
-            col(CapturedRequestRow.reply_status),
-        )
-        .where(col(CapturedRequestRow.bin_id) == bin_id)
-        .order_by(col(CapturedRequestRow.id).desc())
-        .limit(limit)
-    )
+    query = select(
+        col(CapturedRequestRow.id),
+        col(CapturedRequestRow.received_at),
+        col(CapturedRequestRow.method),
+        col(CapturedRequestRow.path),
+        col(CapturedRequestRow.query_string),
+        col(CapturedRequestRow.body_size),
+        col(CapturedRequestRow.body_truncated),
+        col(CapturedRequestRow.content_type),
+        col(CapturedRequestRow.reply_status),
+    ).where(*_matching(bin_id, where))
+    if before is not None:
+        query = query.where(col(CapturedRequestRow.id) < before)
+    rows = await session.execute(query.order_by(col(CapturedRequestRow.id).desc()).limit(limit))
     return [
         RequestSummary(
             id=row.id,
@@ -222,6 +289,42 @@ async def list_requests(session: AsyncSession, bin_id: str, *, limit: int) -> li
     ]
 
 
+async def count_requests(session: AsyncSession, bin_id: str, where: RequestFilter = EVERY_REQUEST) -> int:
+    """Count a bin's requests that match a filter.
+
+    Args:
+        session: An open session.
+        bin_id: The bin id.
+        where: Which requests to count.
+
+    Returns:
+        The number of requests.
+    """
+    query = select(func.count()).select_from(CapturedRequestRow).where(*_matching(bin_id, where))
+    return (await session.execute(query)).scalar_one()
+
+
+async def requests_after(
+    session: AsyncSession, bin_id: str, *, after: UUID | None, limit: int
+) -> list[CapturedRequest]:
+    """Read a bin's requests in full, oldest first, a page at a time.
+
+    Args:
+        session: An open session.
+        bin_id: The bin id.
+        after: Only requests newer than the one with this id; from the oldest when None.
+        limit: The most requests to return.
+
+    Returns:
+        The requests.
+    """
+    query = select(CapturedRequestRow).where(col(CapturedRequestRow.bin_id) == bin_id)
+    if after is not None:
+        query = query.where(col(CapturedRequestRow.id) > after)
+    rows = await session.scalars(query.order_by(col(CapturedRequestRow.id)).limit(limit))
+    return [_request(row) for row in rows]
+
+
 async def get_request(session: AsyncSession, bin_id: str, request_id: UUID) -> CapturedRequest | None:
     """Read one request of a bin.
 
@@ -236,6 +339,61 @@ async def get_request(session: AsyncSession, bin_id: str, request_id: UUID) -> C
     row = await session.get(CapturedRequestRow, request_id)
     if row is None or row.bin_id != bin_id:
         return None
+    return _request(row)
+
+
+async def delete_request(session: AsyncSession, bin_id: str, request_id: UUID) -> bool:
+    """Delete one request of a bin.
+
+    Args:
+        session: An open session; the caller commits.
+        bin_id: The bin id.
+        request_id: The request id.
+
+    Returns:
+        Whether the bin held a request with that id.
+    """
+    deleted = await session.execute(
+        delete(CapturedRequestRow)
+        .where(col(CapturedRequestRow.bin_id) == bin_id, col(CapturedRequestRow.id) == request_id)
+        .returning(col(CapturedRequestRow.id))
+    )
+    return deleted.scalar_one_or_none() is not None
+
+
+async def clear_requests(session: AsyncSession, bin_id: str) -> None:
+    """Delete every request of a bin.
+
+    Args:
+        session: An open session; the caller commits.
+        bin_id: The bin id.
+    """
+    await session.execute(delete(CapturedRequestRow).where(col(CapturedRequestRow.bin_id) == bin_id))
+
+
+def _matching(bin_id: str, where: RequestFilter) -> list[ColumnElement[bool]]:
+    conditions = [col(CapturedRequestRow.bin_id) == bin_id]
+    if where.method is not None:
+        conditions.append(col(CapturedRequestRow.method) == where.method.value)
+    if where.text:
+        conditions.append(
+            or_(
+                *(
+                    column.icontains(where.text, autoescape=True)
+                    for column in (
+                        col(CapturedRequestRow.method),
+                        col(CapturedRequestRow.path),
+                        col(CapturedRequestRow.query_string),
+                        cast(col(CapturedRequestRow.headers), Text),
+                        col(CapturedRequestRow.body_preview),
+                    )
+                )
+            )
+        )
+    return conditions
+
+
+def _request(row: CapturedRequestRow) -> CapturedRequest:
     return CapturedRequest(
         id=row.id,
         bin_id=row.bin_id,
@@ -263,10 +421,17 @@ def _bin(row: BinRow) -> Bin:
         created_at=row.created_at,
         last_activity_at=row.last_activity_at,
         expires_at=row.expires_at,
+        reply=ReplyConfig(
+            status=row.reply_status,
+            content_type=row.reply_content_type,
+            headers=_pairs(row.reply_headers),
+            body=row.reply_body,
+            delay_ms=row.reply_delay_ms,
+        ),
     )
 
 
-def _bin_summaries() -> Select[tuple[str, str | None, datetime, datetime, int]]:
+def _bin_summaries() -> Select[tuple[str, str | None, datetime, datetime, datetime, int]]:
     request_count = (
         select(func.count())
         .select_from(CapturedRequestRow)
@@ -279,6 +444,7 @@ def _bin_summaries() -> Select[tuple[str, str | None, datetime, datetime, int]]:
         col(BinRow.label),
         col(BinRow.created_at),
         col(BinRow.last_activity_at),
+        col(BinRow.expires_at),
         request_count.label("request_count"),
     ).order_by(col(BinRow.last_activity_at).desc(), col(BinRow.id))
 

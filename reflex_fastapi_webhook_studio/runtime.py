@@ -9,7 +9,9 @@ from reflex_fastapi_webhook_studio.bus.redis_bus import RedisBus
 from reflex_fastapi_webhook_studio.db.engine import Database
 from reflex_fastapi_webhook_studio.log_config import configure_logging
 from reflex_fastapi_webhook_studio.services.bins import BinService
+from reflex_fastapi_webhook_studio.services.replay import ReplayService
 from reflex_fastapi_webhook_studio.services.requests import RequestService
+from reflex_fastapi_webhook_studio.services.sweeper import Sweeper
 from reflex_fastapi_webhook_studio.settings import get_settings
 
 if TYPE_CHECKING:
@@ -22,4 +24,6 @@ database = Database(settings.database_url)
 redis = get_redis()
 bus: EventBus = MemoryBus() if redis is None else RedisBus(redis)
 bin_service = BinService(database, settings, bus=bus)
-request_service = RequestService(database)
+request_service = RequestService(database, bus=bus)
+replay_service = ReplayService(request_service, settings)
+sweeper = Sweeper(database, settings.sweep_interval_s, bus=bus)

@@ -7,7 +7,7 @@ from reflex_base.event import EventSpec
 
 from reflex_fastapi_webhook_studio import runtime
 from reflex_fastapi_webhook_studio.domain import MAX_LABEL_LENGTH, BinLimitError, BinListing
-from reflex_fastapi_webhook_studio.ui.views import BinRowView, bin_row, known_ids, parse_bin_id, remember
+from reflex_fastapi_webhook_studio.ui.views import BinRowView, bin_row, forget, known_ids, parse_bin_id, remember
 
 
 class HomeState(rx.State):
@@ -38,12 +38,19 @@ class HomeState(rx.State):
         self.open_text = value
 
     async def load(self) -> None:
-        """List every bin in `all` mode, or the bins this browser made in `browser` mode."""
+        """List every bin in `all` mode, or the bins this browser made in `browser` mode.
+
+        In `browser` mode it also forgets bins that were deleted or expired.
+        """
         self.listing_all = runtime.settings.bin_listing is BinListing.ALL
         if self.listing_all:
             summaries = await runtime.bin_service.list_all()
         else:
-            summaries = await runtime.bin_service.summaries(known_ids(self.known_bins))
+            remembered = known_ids(self.known_bins)
+            summaries = await runtime.bin_service.summaries(remembered)
+            missing = set(remembered) - {summary.id for summary in summaries}
+            if missing:
+                self.known_bins = forget(self.known_bins, missing)
         self.bins = [bin_row(summary) for summary in summaries]
 
     async def create_bin(self) -> AsyncIterator[EventSpec | None]:

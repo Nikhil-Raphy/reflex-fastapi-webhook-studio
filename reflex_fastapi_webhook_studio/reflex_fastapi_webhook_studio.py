@@ -6,7 +6,7 @@ import reflex as rx
 
 from reflex_fastapi_webhook_studio.api.app import ApiFirst, create_api
 from reflex_fastapi_webhook_studio.bus.redis_bus import RedisBus
-from reflex_fastapi_webhook_studio.runtime import bus, database, redis, settings
+from reflex_fastapi_webhook_studio.runtime import bus, database, redis, settings, sweeper
 from reflex_fastapi_webhook_studio.ui.live import sockets
 from reflex_fastapi_webhook_studio.ui.pages.home import home
 from reflex_fastapi_webhook_studio.ui.pages.inspector import inspector
@@ -43,4 +43,5 @@ app.add_page(
 app.register_lifespan_task(database.lifespan)
 if isinstance(bus, RedisBus):
     app.register_lifespan_task(bus.listen)
+app.register_lifespan_task(sweeper.run)
 sockets.attach(app)
