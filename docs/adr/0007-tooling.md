@@ -19,8 +19,10 @@ length of 120. It needs strict typing and as few tools as possible.
 - **Types:** `mypy --strict` with the Pydantic plugin.
 - **Tests:** pytest with the anyio plugin and `pytest-cov`. Lines and branches together must reach 90% coverage.
   Test names and `# Given` / `# When` / `# Then` blocks carry the Gherkin form, not `.feature` files.
-- **Browser tests:** pytest-playwright drives the built app in production mode. They carry the `e2e` marker, and a
-  plain `pytest` run leaves them out; `pytest -m e2e` runs them.
+- **Browser tests:** they live in their own repo,
+  [playwright-e2e-tests-webhook-studio](https://github.com/Nikhil-Raphy/playwright-e2e-tests-webhook-studio). CI
+  checks it out and runs it against each change, in Chromium, Firefox and WebKit. This repo keeps unit and
+  integration tests only.
 - **Hooks:** pre-commit runs Ruff, `uv lock`, mypy, pylint, file checks and a Conventional Commits check.
 
 ## Consequences

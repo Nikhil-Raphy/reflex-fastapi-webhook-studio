@@ -342,6 +342,8 @@ publishes port 17300 on `127.0.0.1` only.
 ## Links
 
 - [Docs site](https://nikhil-raphy.github.io/reflex-fastapi-webhook-studio/)
+- [Browser tests](https://github.com/Nikhil-Raphy/playwright-e2e-tests-webhook-studio): Playwright tests in
+  Chromium, Firefox and WebKit, including WCAG 2.2 AA accessibility scans. CI runs them against every change.
 - [Decision records](docs/adr/index.md)
 
 ## Contributions
