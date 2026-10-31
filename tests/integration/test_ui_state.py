@@ -3,15 +3,17 @@
 # Fixtures take other fixtures as arguments of the same name.
 # pylint: disable=redefined-outer-name
 
+import asyncio
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid7
 
 import pytest
 from reflex.istate.data import RouterData
 
 from reflex_fastapi_webhook_studio import runtime
+from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.domain import (
     BinEvent,
     BinListing,
@@ -26,12 +28,16 @@ from reflex_fastapi_webhook_studio.services.capture import CaptureService
 from reflex_fastapi_webhook_studio.services.replay import ReplayService
 from reflex_fastapi_webhook_studio.services.requests import RequestService
 from reflex_fastapi_webhook_studio.settings import Settings
+from reflex_fastapi_webhook_studio.ui.live import sockets
 from reflex_fastapi_webhook_studio.ui.state import inspector as inspector_module
 from reflex_fastapi_webhook_studio.ui.state.home import HomeState
 from reflex_fastapi_webhook_studio.ui.state.inspector import ALL_METHODS, SKIP, InspectorState
 from reflex_fastapi_webhook_studio.ui.views import PairView, ReplayView, ReplyForm, RequestView
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
+    import reflex as rx
     from reflex.state import BaseState
     from reflex_base.event import EventSpec
 
@@ -320,6 +326,85 @@ async def test_given_open_inspector_when_bin_events_arrive_then_list_and_label_f
     assert [row.id for row in inspector.requests] == [str(stored.id)]
     assert inspector.detail.id == str(stored.id)
     assert (labelled, inspector.label) == ("renamed", "No label")
+
+
+async def until(check: Callable[[], bool]) -> None:
+    """Wait up to 5 s for a background task to make a condition true.
+
+    Args:
+        check: The condition.
+    """
+    async with asyncio.timeout(5):
+        while not check():  # noqa: ASYNC110  # Page state offers no event to wait on, so poll it.
+            await asyncio.sleep(0.01)
+
+
+def watch(inspector: InspectorState) -> Coroutine[Any, Any, None]:
+    """Run the inspector's watch task on a state, as Reflex's background runner does.
+
+    Reflex refuses a direct call to a background task, so this calls the function its handler wraps.
+
+    Args:
+        inspector: The state.
+
+    Returns:
+        The running task's coroutine.
+    """
+    handler = cast("rx.EventHandler", InspectorState.watch)
+    # Reflex makes the method an EventHandler when the class is built, which pylint cannot see.
+    return cast("Coroutine[Any, Any, None]", handler.fn(inspector))  # pylint: disable=no-member
+
+
+@pytest.mark.anyio
+async def test_given_watched_bin_when_tab_closes_then_watch_stops_at_the_next_quiet_heartbeat(
+    database: Database, services: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Given a watched bin whose tab has closed, when a heartbeat passes with no event, then the watch task stops."""
+    # Given
+    bin_ = await BinService(database, services).create(None)
+    monkeypatch.setattr(runtime, "bus", MemoryBus())
+    monkeypatch.setattr(inspector_module, "HEARTBEAT_S", 0.01)
+    monkeypatch.setattr(sockets, "connected", lambda _token: False)
+    inspector = make_state(InspectorState, f"/bins/{bin_.id}")
+    # When
+    async with asyncio.timeout(5):
+        await watch(inspector)
+    # Then
+    assert (inspector.found, inspector.loading, inspector.live) == (True, False, False)
+    # Clearing the guard lets the tab start a new watch task after a reconnect.
+    assert inspector._watcher == ""  # noqa: SLF001  # pylint: disable=protected-access
+
+
+@pytest.mark.anyio
+async def test_given_watched_bin_when_events_arrive_then_page_follows_until_the_bin_is_deleted(
+    database: Database, services: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Given a watched bin, when a request, a resync and a delete arrive, then the page follows them and stops."""
+    # Given
+    bin_ = await BinService(database, services).create(None)
+    bus = MemoryBus()
+    monkeypatch.setattr(runtime, "bus", bus)
+    monkeypatch.setattr(sockets, "connected", lambda _token: True)
+    capture = CaptureService(database, services)
+    inspector = make_state(InspectorState, f"/bins/{bin_.id}")
+    async with asyncio.TaskGroup() as group:
+        group.create_task(watch(inspector))
+        await until(lambda: inspector.live)
+        async with asyncio.timeout(1):
+            await watch(inspector)
+        still_live = inspector.live
+        # When
+        first = await capture.capture(bin_.id, INCOMING, reply_status=200)
+        await bus.publish(BinEvent(type=EventType.REQUEST_CAPTURED, bin_id=bin_.id, request=first.summary()))
+        unseen = await capture.capture(bin_.id, replace(INCOMING, path="/unseen"), reply_status=200)
+        await bus.publish(BinEvent(type=EventType.RESYNC, bin_id=bin_.id))
+        await until(lambda: len(inspector.requests) == 2)
+        listed = [row.id for row in inspector.requests]
+        await bus.publish(BinEvent(type=EventType.BIN_DELETED, bin_id=bin_.id))
+    # Then
+    assert still_live
+    assert listed == [str(unseen.id), str(first.id)]
+    assert (inspector.found, inspector.deleted, inspector.live) == (False, True, False)
 
 
 def args_text(specs: EventSpec | list[EventSpec] | None) -> str:
