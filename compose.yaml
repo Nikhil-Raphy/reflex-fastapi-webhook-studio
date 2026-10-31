@@ -1,0 +1,68 @@
+# Team deploy: the app, a one-shot migration, PostgreSQL and Redis. Copy .env.example to .env and set
+# POSTGRES_PASSWORD first. See docs/guide/deploy.md.
+name: webhook-studio
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        API_URL: ${APP_URL:-http://localhost:17300}
+    image: webhook-studio:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WEBHOOK_STUDIO_DATABASE_URL: postgresql+psycopg://studio:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/studio
+      REFLEX_REDIS_URL: redis://redis:6379/0
+      REFLEX_API_URL: ${APP_URL:-http://localhost:17300}
+      REFLEX_DEPLOY_URL: ${APP_URL:-http://localhost:17300}
+      REFLEX_CORS_ALLOWED_ORIGINS: ${APP_URL:-http://localhost:17300}
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-17300}:17300"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    image: webhook-studio:local
+    pull_policy: never
+    command: [ "alembic", "upgrade", "head" ]
+    environment:
+      WEBHOOK_STUDIO_DATABASE_URL: postgresql+psycopg://studio:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/studio
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+    environment:
+      POSTGRES_USER: studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: studio
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U studio -d studio" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
