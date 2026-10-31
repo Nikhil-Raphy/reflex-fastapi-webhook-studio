@@ -12,11 +12,12 @@ concurrency:
 
 jobs:
   release-please:
+    name: release-please
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: write # push the release branch, tag and GitHub release
+      issues: write # create and update the release labels
+      pull-requests: write # open and update the release pull request
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:

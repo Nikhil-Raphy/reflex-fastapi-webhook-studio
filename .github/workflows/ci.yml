@@ -17,6 +17,7 @@ env:
 
 jobs:
   lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,10 +34,11 @@ jobs:
       - run: uv run mypy .
 
   test:
+    name: test
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: studio_test
@@ -48,7 +50,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        image: redis:8-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
         ports:
           - 6379:6379
         options: >-
@@ -71,6 +73,7 @@ jobs:
       - run: uv run pytest --cov
 
   e2e:
+    name: e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -85,7 +88,37 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m e2e
 
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: ci-only-not-secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and start the stack
+        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          base=http://localhost:17300
+          curl --fail --silent "$base/api/v1/health" | grep '"redis":"ok"'
+          bin_id=$(curl --fail --silent -X POST "$base/api/v1/bins" | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])')
+          curl --fail --silent -X POST "$base/api/webhook/$bin_id/smoke" -d 'hello'
+          curl --fail --silent "$base/api/v1/bins/$bin_id/requests" | grep '"/smoke"'
+          curl --fail --silent --output /dev/null "$base/bins/$bin_id"
+          test "$(docker compose exec -T app id -u)" != "0"
+      - name: Show logs
+        if: failure()
+        run: docker compose logs
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes
+
   audit:
+    name: audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
