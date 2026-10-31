@@ -41,7 +41,11 @@ Run one process, with our API in front of Reflex.
 - Requests under `/api` never meet Reflex's CORS layer. Capture routes set their own CORS headers, and see and store
   preflights. The management API under `/api/v1` sends no CORS headers.
 - An unknown path under `/api` gets FastAPI's JSON 404.
-- Reflex's own routes, such as `/_event` and `/ping`, keep Reflex's CORS layer.
+- Reflex's own routes, such as `/_event` and `/ping`, keep Reflex's CORS layer. Docker Compose sets
+  `REFLEX_CORS_ALLOWED_ORIGINS` to `APP_URL`, so in Docker they accept only the app's own origin.
+- The Docker image builds the pages once and runs Caddy in front of a backend-only Reflex process. Caddy serves the
+  pages and passes `/api`, `/_event`, `/ping`, `/_health`, `/_upload` and `/_all_routes` to the backend, so users
+  still see one port. See ADR-0003.
 - Our routes must stay clear of the routes Reflex keeps: `/_event`, `/ping`, `/_upload`, `/_health` and
   `/_all_routes`.
 - Requests under `/api` skip Reflex's request context, so API code must not touch Reflex state.

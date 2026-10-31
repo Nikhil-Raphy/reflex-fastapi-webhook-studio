@@ -7,7 +7,8 @@ Accepted
 ## Context
 
 One person must be able to run the app with nothing more to install. A shared server, where several requests write
-at once, is better served by PostgreSQL. The code should not care which one it talks to.
+at once, is better served by PostgreSQL. The code should not care which one it talks to. A small team wants one
+command that starts the app, its database and Redis together.
 
 ## Decision
 
@@ -25,6 +26,13 @@ at once, is better served by PostgreSQL. The code should not care which one it t
   - Alembic uses batch mode on SQLite, which cannot alter most columns in place.
 - PostgreSQL text and JSON columns refuse the NUL character. Before storing the path, query, headers and content
   type, the app replaces each NUL with U+FFFD. The body column stores the bytes as they came.
+- For a team, `compose.yaml` runs four services: `app`, a one-shot `migrate` that runs `alembic upgrade head`,
+  `postgres` and `redis`. `app` starts only after `migrate` ends well. Each image is pinned by digest.
+- The `Dockerfile` follows Reflex's own production example. A build stage installs the locked packages with uv and
+  builds the pages with bun. The final stage holds Python, the app and Caddy, but not pip, bun or `node_modules`, and
+  runs as a user without root rights. Caddy serves the built pages on port 17300 and passes the backend routes to
+  `reflex run --env prod --backend-only`. `rxconfig.py` sets a dev frontend port, which `--backend-only` refuses, so
+  the image sets `REFLEX_FRONTEND_PORT=0`.
 
 ## Consequences
 
@@ -33,3 +41,8 @@ at once, is better served by PostgreSQL. The code should not care which one it t
   empty PostgreSQL database. CI runs a PostgreSQL 18 service container for this.
 - The text form of a request can differ from what the sender sent where it held a NUL. The stored body is exact.
 - The app does not move data from SQLite to PostgreSQL.
+- The pages are built with `APP_URL`, so changing it means rebuilding the image. In the browser, Reflex swaps a
+  `localhost` address for the host the page came from, and drops the port under HTTPS, so a proxy with TLS works.
+- Behind the image's Caddy every request comes from `127.0.0.1`, so the app takes the sender's address from the last
+  `X-Forwarded-For` entry, but only from a peer on the same machine.
+- CI builds the image, starts the whole stack and sends a request through it on every pull request.
