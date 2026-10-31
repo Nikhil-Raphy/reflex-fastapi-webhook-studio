@@ -1,5 +1,5 @@
 @startuml 06-deployment
-title 06 Deployment: one developer machine
+title 06 Deployment: a developer machine, and Docker Compose
 
 node "Developer machine" {
   node "Browser" as browser
@@ -39,6 +39,24 @@ node "Redis server\n(optional, REFLEX_REDIS_URL)" as redis {
   database "Reflex page state\nwebhook-studio:bin:* channels" as redis_data
 }
 
+node "Docker host: docker compose up ~--build ~--wait" as host {
+  node "Optional TLS proxy\n(on APP_URL)" as proxy
+  node "app container\n(user studio, not root)\npublished on APP_BIND:APP_PORT,\n127.0.0.1:17300 by default" as app {
+    component "Caddy\nport 17300" as caddy
+    artifact "Built frontend files\n/srv" as frontend_docker
+    node "reflex run ~--env prod ~--backend-only\n(Granian, port 8000)" as backend_docker {
+      component "ApiFirst" as first_docker
+      component "Reflex backend" as reflex_docker
+      component "FastAPI app" as api_docker
+    }
+  }
+  node "migrate container\n(runs once: alembic upgrade head)" as migrate_docker
+  node "postgres container\n(PostgreSQL 18, volume postgres-data)" as postgres_docker
+  node "redis container\n(Redis 8)" as redis_docker
+}
+
+node "Browser or sender" as remote
+
 browser --> devserver : HTTP, page
 browser --> first_dev : WebSocket /_event,\nHTTP /api/v1
 sender --> first_dev : HTTP /api/webhook
@@ -56,5 +74,16 @@ api_prod ..> postgres : psycopg
 migrate ..> postgres
 reflex_prod ..> redis : state, events
 api_prod ..> redis : publish events
+
+remote --> proxy : HTTPS
+proxy --> caddy : HTTP
+remote ..> caddy : HTTP, without a proxy
+caddy --> frontend_docker : page files
+caddy --> first_docker : /api, /_event, /ping,\n/_health, /_upload, /_all_routes
+first_docker --> reflex_docker
+first_docker --> api_docker
+api_docker --> postgres_docker : psycopg
+reflex_docker --> redis_docker : state, events
+migrate_docker --> postgres_docker : creates the tables,\nbefore app starts
 
 @enduml

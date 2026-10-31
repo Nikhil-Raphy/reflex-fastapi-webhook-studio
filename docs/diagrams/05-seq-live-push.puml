@@ -38,10 +38,27 @@ else REFLEX_REDIS_URL set
   listen_b -> memory_b : deliver(event)
 end
 memory_b -> watch : next() gives the event
-alt request already listed
+alt a search or method filter is on
+  watch -> watch : reload the list from the database,\nwhich alone knows what matches
+else request already listed
   watch -> watch : skip it
 else new request
   watch --> tab : add the row at the top
+end
+
+== Other bin events ==
+note over capture, tab
+  Deletes, clears and edits travel the same way, from the API or a page on any worker.
+end note
+memory_b -> watch : event
+alt request.deleted
+  watch --> tab : drop the row; select its neighbour if it was open
+else bin.cleared
+  watch --> tab : empty the list
+else bin.updated
+  watch --> tab : reload the label, reply and expiry
+else bin.deleted
+  watch --> tab : show "This bin was deleted"; the task stops
 end
 
 == Quiet heartbeat ==
