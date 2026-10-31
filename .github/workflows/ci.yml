@@ -72,21 +72,54 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: uv run pytest --cov
 
-  e2e:
-    name: e2e
+  ui-tests:
+    name: ui-tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      APP_DIR: ../app
+      POSTGRES_PASSWORD: ci-only-not-secret
+      BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: app
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Check out the browser tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-      - run: uv sync --locked --all-extras
-      - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest -m e2e
+          repository: Nikhil-Raphy/playwright-e2e-tests-webhook-studio
+          ref: main
+          path: e2e-tests
+          persist-credentials: false
+      - name: Build the stack
+        working-directory: e2e-tests
+        run: docker compose build
+      - name: Run the browser tests against this change
+        working-directory: e2e-tests
+        run: >-
+          E2E_UID="$(id -u)" E2E_GID="$(id -g)"
+          docker compose run --rm tests pytest tests/e2e --browser "$BROWSER" --reruns 1
+          --junitxml="reports/junit-$BROWSER.xml"
+      - name: Show the stack's logs
+        if: failure()
+        working-directory: e2e-tests
+        run: docker compose logs app app-local echo
+      - name: Keep traces, videos and screenshot diffs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-test-results-${{ matrix.browser }}
+          path: e2e-tests/test-results/
+          retention-days: 14
+      - name: Stop the stack
+        if: always()
+        working-directory: e2e-tests
+        run: docker compose down --volumes
 
   docker:
     name: docker
