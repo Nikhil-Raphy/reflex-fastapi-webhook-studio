@@ -7,12 +7,18 @@ copyright: Copyright 2026 Nikhil-Raphy. Apache-2.0 license.
 
 nav:
   - Home: index.md
+  - Guides:
+      - guide/using.md
+      - guide/api.md
+      - guide/configuration.md
+      - guide/deploy.md
   - Decisions:
       - adr/index.md
       - adr/0001-one-process-fastapi-in-reflex.md
       - adr/0002-sqlmodel-own-async-engine-and-alembic.md
       - adr/0003-sqlite-and-postgresql.md
       - adr/0004-live-push-via-event-bus.md
+      - adr/0005-replay-modes-and-ssrf-guard.md
       - adr/0006-capture-replies-in-csp-sandbox.md
       - adr/0007-tooling.md
       - adr/0008-docs-with-zensical.md

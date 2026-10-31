@@ -8,7 +8,11 @@ it, in one process.
 
 You make a bin and get a URL. Any request sent to that URL, or to a path under it, is stored: the method, path,
 query, headers in the order they came, and the exact body bytes. The bin's page in your browser shows each request
-the moment it arrives, with no refresh. A REST API gives the same data to scripts.
+the moment it arrives, with no refresh.
+
+From that page you can filter and search the requests, delete them, export the bin as JSON, copy a request as a curl
+command, choose what the bin sends back, and send a request again to another URL. A REST API does the same for
+scripts. A bin is deleted a week after its last request.
 
 ## Run it
 
@@ -36,93 +40,14 @@ To serve both on one port, run the production build. Production mode needs the b
 uv run reflex run --env prod --backend-port 17300
 ```
 
-Then the home page is at <http://localhost:17300> and the API under <http://localhost:17300/api/>.
+For a team, Docker Compose runs the app with PostgreSQL and Redis; see [Deploy with Docker](guide/deploy.md).
 
-## Use the pages
+## Guides
 
-- **Make a bin:** on the home page, type a label if you want one and press **New bin**. The bin's page opens with
-  its URL and a **Copy URL** button. While the bin is empty, the page shows a curl command to copy.
-- **Open a bin:** paste its id, its URL or its page address into the **Open a bin** box. The home page lists the
-  bins made in this browser, or every bin when `WEBHOOK_STUDIO_BIN_LISTING` is `all`.
-- **Inspect requests:** the list on the left shows the newest first, with the method in a colour of its own. Click
-  one to see it in four tabs: Overview, Headers, Query and Body. Headers that often hold secrets show as `••••`
-  until clicked. JSON bodies are laid out with indents, form data shows as a table, and binary bodies show their size
-  with a **Download** button. The page never renders a body as HTML.
-- **Live updates:** new requests appear at once, in every tab that has the bin open. The dot at the top right shows
-  **Live**, **Connecting** or **Offline**.
-
-## Use the API
-
-The examples use dev mode. In production mode, use port 17300.
-
-```bash
-BASE=http://localhost:17301
-
-# Create a bin; the reply holds its id.
-curl -s -X POST $BASE/api/v1/bins -H 'content-type: application/json' -d '{"label": "GitHub"}'
-BIN=<the id from the reply>
-
-# Send JSON, form data and a query string to it.
-curl -s -X POST $BASE/api/webhook/$BIN -H 'content-type: application/json' -d '{"event": "push"}'
-curl -s -X POST $BASE/api/webhook/$BIN/forms -d 'name=Ada&lang=python'
-curl -s "$BASE/api/webhook/$BIN/search?tag=a&tag=b"
-
-# List what it caught, newest first, then read one request in full.
-curl -s "$BASE/api/v1/bins/$BIN/requests?limit=10"
-curl -s $BASE/api/v1/bins/$BIN/requests/<request id>
-```
-
-The bin takes `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` and `OPTIONS`, and stores whatever follows the bin id
-as the path.
-
-| The bin replies with                          | When                                                                    |
-| --------------------------------------------- | ----------------------------------------------------------------------- |
-| `200` and `{"ok": true, "request_id": "…"}`   | It stored the request. A `HEAD` reply has no body.                      |
-| `204`                                         | CORS is on and a browser sent a preflight. The preflight is stored too. |
-| `404`                                         | No bin has this id. Nothing is stored.                                  |
-| `405`                                         | The method is not one of the seven above. Nothing is stored.            |
-| `413` and the `request_id`                    | The body is over the size cap. The request is stored without its body.  |
-
-A stored request holds its headers and query as lists of name and value pairs, in the order they came. The body is
-in `body_base64`, and also in `body_text` when it is valid UTF-8.
-
-## REST API
-
-| Method | Path                                          | Purpose                                         |
-| ------ | --------------------------------------------- | ----------------------------------------------- |
-| any    | `/api/webhook/{bin_id}` and any path under it | Catch a request                                 |
-| POST   | `/api/v1/bins`                                | Create a bin, with an optional label. Returns `201`. |
-| GET    | `/api/v1/bins`                                | List every bin with its request count. Only when `WEBHOOK_STUDIO_BIN_LISTING` is `all`; otherwise `404`. |
-| GET    | `/api/v1/bins/{bin_id}`                       | Read a bin                                      |
-| PATCH  | `/api/v1/bins/{bin_id}`                       | Change or clear the label                       |
-| GET    | `/api/v1/bins/{bin_id}/requests`              | List requests, newest first; `limit` 1 to 100, 50 if left out |
-| GET    | `/api/v1/bins/{bin_id}/requests/{request_id}` | Read one request in full                        |
-| GET    | `/api/v1/health`                              | Check that the app, its database and Redis, when used, answer |
-
-Errors come as [problem details](https://www.rfc-editor.org/rfc/rfc9457) with the type
-`application/problem+json`. The OpenAPI page is at `/api/docs` and the schema at `/api/openapi.json`.
-
-## Configuration
-
-The app reads these environment variables when it starts. It stops with an error that names the variable if a
-value is wrong.
-
-| Variable                              | Default                                      | Meaning                                                    |
-| ------------------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
-| `WEBHOOK_STUDIO_DATABASE_URL`         | `sqlite+aiosqlite:///data/webhook_studio.db` | Database URL. Use `sqlite+aiosqlite` or `postgresql+psycopg`. |
-| `WEBHOOK_STUDIO_CORS_ENABLED`         | `true`                                       | CORS headers on capture replies, and answers to preflights. |
-| `WEBHOOK_STUDIO_MAX_BODY_BYTES`       | `1048576`                                    | Largest body to store, in bytes.                           |
-| `WEBHOOK_STUDIO_MAX_REQUESTS_PER_BIN` | `500`                                        | Most requests a bin keeps. The oldest go first.            |
-| `WEBHOOK_STUDIO_MAX_BINS`             | `1000`                                       | Most bins the app holds. One more gets `409`.              |
-| `WEBHOOK_STUDIO_BIN_LISTING`          | `browser`                                    | Which bins the home page lists: `browser` or `all`.         |
-| `WEBHOOK_STUDIO_LOG_LEVEL`            | `INFO`                                       | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`.          |
-| `REFLEX_REDIS_URL`                    | unset                                        | A Redis URL. When set, Reflex keeps page state in Redis and can run several workers, and live updates travel through it. |
-
-To keep your settings in a file, copy `.env.example` to `.env`, edit it, and load it with `set -a; . ./.env; set +a`
-before you run `alembic` or `reflex`.
-
-To use PostgreSQL, run `uv sync --extra postgres`, set `WEBHOOK_STUDIO_DATABASE_URL` to a
-`postgresql+psycopg://` URL for an empty database, and run `uv run alembic upgrade head`.
+- [Use the pages](guide/using.md): bins, filters, deletes, export, copy as curl, replies and replay.
+- [REST API](guide/api.md): every route, with examples, the reply rules and the export format.
+- [Configuration](guide/configuration.md): environment variables, PostgreSQL and several workers.
+- [Deploy with Docker](guide/deploy.md): Compose, a proxy with TLS, and what to expose.
 
 ## Security
 
@@ -130,9 +55,11 @@ To use PostgreSQL, run `uv sync --extra postgres`, set `WEBHOOK_STUDIO_DATABASE_
   to the bin and read all it caught.
 - With `WEBHOOK_STUDIO_BIN_LISTING=all`, anyone who can open the home page sees every bin id.
 - Masked headers are hidden on screen only. The browser still receives their values.
-- Every reply from `/api/webhook/` carries `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+- Every reply from `/api/webhook/` carries `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`,
+  the bin's own reply included. A reply may not set headers that would undo them.
 - With CORS on, capture replies carry `Access-Control-Allow-Origin: *`, never with credentials. The management API
   under `/api/v1` sends no CORS headers.
+- Replays reach only public internet addresses unless `WEBHOOK_STUDIO_REPLAY_MODE` is `local`.
 - If you put the app on the internet, expose only `/api/webhook/*`.
 - Logs never hold bodies or header values, and show only the first 6 characters of a bin id.
 
