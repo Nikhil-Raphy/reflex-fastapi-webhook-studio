@@ -162,3 +162,8 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - run: uv export --locked --all-groups --all-extras --no-emit-project -o requirements-audit.txt
       - run: uvx pip-audit@2.10.1 -r requirements-audit.txt --require-hashes --disable-pip --progress-spinner off
+      - run: >-
+          uvx pip-audit@2.10.1 -r requirements-audit.txt --require-hashes --disable-pip --progress-spinner off
+          --vulnerability-service osv
+      - run: uv audit --locked
+      - run: uvx zizmor@1.31.1 --offline .github/
