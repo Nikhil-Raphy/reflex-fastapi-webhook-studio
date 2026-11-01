@@ -246,6 +246,44 @@ async def test_given_local_mode_when_replayed_then_same_method_body_and_headers_
 
 
 @pytest.mark.anyio
+async def test_given_local_mode_when_replayed_then_every_header_but_hop_by_hop_ones_arrives_in_order(
+    database: Database, echo_server: EchoServer
+) -> None:
+    """Given `local` mode, when replayed, then every captured header arrives in order, less hop-by-hop ones."""
+    # Given
+    headers = [
+        ("x-first", "1"),
+        ("connection", "keep-alive, x-drop"),
+        ("keep-alive", "timeout=5"),
+        ("te", "trailers"),
+        ("upgrade", "h2c"),
+        ("proxy-connection", "close"),
+        ("x-drop", "named by Connection"),
+        ("x-dup", "a"),
+        ("authorization", "Bearer kept"),
+        ("x-dup", "b"),
+    ]
+    hop_by_hop = {"connection", "keep-alive", "te", "upgrade", "proxy-connection", "x-drop"}
+    # The HTTP client sets these two from the target URL and the body.
+    set_by_client = {"host", "content-length"}
+    async with api_client(database, LOCAL) as client:
+        bin_id = (await client.post("/api/v1/bins")).json()["id"]
+        sent = await client.post(f"/api/webhook/{bin_id}", content=b"x", headers=headers)
+        request_id = sent.json()["request_id"]
+        stored = (await client.get(f"/api/v1/bins/{bin_id}/requests/{request_id}")).json()["headers"]
+        # When
+        await client.post(
+            f"/api/v1/bins/{bin_id}/requests/{request_id}/replay", json={"target_url": f"{echo_server.url}/all"}
+        )
+    # Then
+    assert hop_by_hop <= {name for name, _ in stored}
+    expected = [(name, value) for name, value in stored if name not in hop_by_hop | set_by_client]
+    arrived = [(name, value) for name, value in echo_server.received[0].headers if name not in set_by_client]
+    assert arrived == expected
+    assert [value for name, value in arrived if name == "x-dup"] == ["a", "b"]
+
+
+@pytest.mark.anyio
 async def test_given_local_mode_when_target_redirects_or_is_large_then_not_followed_and_cut(
     database: Database, echo_server: EchoServer
 ) -> None:
