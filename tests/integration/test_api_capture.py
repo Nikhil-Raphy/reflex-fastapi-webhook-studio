@@ -42,14 +42,17 @@ async def test_given_bin_when_json_is_posted_then_exact_bytes_and_header_order_a
     headers = [("content-type", "application/json"), ("x-sig", "b"), ("x-a", "1"), ("x-sig", "c")]
     async with api_client(database) as client:
         bin_id = await new_bin(client)
+        request = client.build_request("POST", f"/api/webhook/{bin_id}", content=body, headers=headers)
+        sent = [[name.decode().lower(), value.decode()] for name, value in request.headers.raw]
         # When
-        response = await client.post(f"/api/webhook/{bin_id}", content=body, headers=headers)
+        response = await client.send(request)
         # Then
         assert response.status_code == 200
         request_id = response.json()["request_id"]
         assert response.json() == {"ok": True, "request_id": request_id}
         detail = (await client.get(f"/api/v1/bins/{bin_id}/requests/{request_id}")).json()
     assert base64.b64decode(detail["body_base64"]) == body
+    assert detail["headers"] == sent
     assert [pair for pair in detail["headers"] if pair[0] in {"x-sig", "x-a"}] == [
         ["x-sig", "b"],
         ["x-a", "1"],
