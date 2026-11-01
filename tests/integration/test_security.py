@@ -1,6 +1,9 @@
 """Tests for the security controls in the design: access, injection, CORS and logs."""
 
+import base64
 import logging
+from functools import reduce
+from operator import and_, or_
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -43,6 +46,19 @@ def test_given_new_bin_ids_when_made_then_each_is_22_url_safe_characters_and_uni
     # Then
     assert len(ids) == count
     assert all(len(bin_id) == BIN_ID_LENGTH and bin_id.replace("-", "").replace("_", "").isalnum() for bin_id in ids)
+
+
+def test_given_new_bin_ids_when_decoded_then_each_holds_128_random_bits() -> None:
+    """Given 256 new bin ids, when decoded, then each holds 16 bytes and every one of the 128 bits takes both values."""
+    # Given
+    ids = [new_bin_id() for _ in range(256)]
+    # When
+    raw = [base64.urlsafe_b64decode(f"{bin_id}==") for bin_id in ids]
+    numbers = [int.from_bytes(value) for value in raw]
+    # Then
+    assert {len(value) for value in raw} == {16}
+    # A bit that never changes shows as 0 in the OR or 1 in the AND; by chance that happens about once in 2**248.
+    assert (reduce(or_, numbers), reduce(and_, numbers)) == ((1 << 128) - 1, 0)
 
 
 @pytest.mark.anyio
