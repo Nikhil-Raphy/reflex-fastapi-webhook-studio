@@ -2,6 +2,7 @@
 
 import asyncio
 from http import HTTPStatus
+from ipaddress import ip_address
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request, Response
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 
 CAPTURE_PREFIX = "/api/webhook"
 LOOPBACK = frozenset({"127.0.0.1", "::1"})
+MAX_ADDRESS_LENGTH = 45
 # A capture reply may hold anything, so the browser must treat it as a sandboxed, opaque origin.
 SAFETY_HEADERS = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
 
@@ -87,7 +89,8 @@ def client_address(request: Request) -> str | None:
     """Find the sender's address.
 
     Behind a proxy on the same machine, such as the Caddy in the Docker image, the peer is the proxy, so the last
-    `X-Forwarded-For` entry (the one that proxy added) names the sender. From any other peer the header is ignored.
+    entry across all `X-Forwarded-For` lines (the one that proxy added) names the sender. The peer counts instead
+    when it is on another machine, or when that entry is not an IP address that fits the stored column.
 
     Args:
         request: The request.
@@ -96,8 +99,14 @@ def client_address(request: Request) -> str | None:
         The address, or None if unknown.
     """
     peer = None if request.client is None else request.client.host
-    forwarded = request.headers.get("x-forwarded-for", "").rsplit(",", 1)[-1].strip()
-    return forwarded if peer in LOOPBACK and forwarded else peer
+    if peer not in LOOPBACK:
+        return peer
+    forwarded = ",".join(request.headers.getlist("x-forwarded-for")).rsplit(",", 1)[-1].strip()
+    try:
+        address = str(ip_address(forwarded))
+    except ValueError:
+        return peer
+    return address if len(address) <= MAX_ADDRESS_LENGTH else peer
 
 
 def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncated: bool) -> IncomingRequest:

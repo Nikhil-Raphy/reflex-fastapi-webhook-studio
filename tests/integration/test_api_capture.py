@@ -340,18 +340,23 @@ async def test_given_bin_with_delay_when_request_arrives_then_event_comes_before
 @pytest.mark.parametrize(
     ("peer", "forwarded", "stored"),
     [
-        ("203.0.113.7", "198.51.100.1", "203.0.113.7"),
-        ("127.0.0.1", "198.51.100.1, 192.0.2.9", "192.0.2.9"),
-        ("::1", "192.0.2.9", "192.0.2.9"),
-        ("127.0.0.1", None, "127.0.0.1"),
+        ("203.0.113.7", ("198.51.100.1",), "203.0.113.7"),
+        ("127.0.0.1", ("198.51.100.1, 192.0.2.9",), "192.0.2.9"),
+        ("127.0.0.1", ("192.0.2.9", "198.51.100.1"), "198.51.100.1"),
+        ("::1", ("192.0.2.9",), "192.0.2.9"),
+        ("::1", ("2001:DB8::1",), "2001:db8::1"),
+        ("127.0.0.1", (), "127.0.0.1"),
+        ("127.0.0.1", ("not-an-address",), "127.0.0.1"),
+        ("127.0.0.1", ("192.0.2.9, ",), "127.0.0.1"),
+        ("127.0.0.1", (f"fe80::1%{'a' * 60}",), "127.0.0.1"),
     ],
 )
 async def test_given_request_through_local_proxy_when_captured_then_forwarded_address_is_kept(
-    database: Database, peer: str, forwarded: str | None, stored: str
+    database: Database, peer: str, forwarded: tuple[str, ...], stored: str
 ) -> None:
-    """Given a request from a peer, when captured, then X-Forwarded-For counts only from a proxy on this machine."""
+    """Given a request from a peer, when captured, then only a valid X-Forwarded-For from this machine counts."""
     # Given
-    headers = {} if forwarded is None else {"x-forwarded-for": forwarded}
+    headers = [("x-forwarded-for", value) for value in forwarded]
     async with api_client(database, client_host=peer) as client:
         bin_id = await new_bin(client)
         # When
