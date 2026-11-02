@@ -17,7 +17,8 @@ five tabs:
 
 - **Overview:** the request id, time, method, path, query string, content type, body size, client address, HTTP
   version and the status sent back.
-- **Headers:** every header in the order it came. Headers that often hold secrets, such as `Authorization`,
+- **Headers:** every header in the order it reached the app. In Docker, Caddy changes some headers first; see
+  [What to know](deploy.md#what-to-know). Headers that often hold secrets, such as `Authorization`,
   `Cookie` and names holding `token`, `secret`, `signature`, `api-key`, `password` or `session`, show as `••••` until
   you click them.
 - **Query:** the raw query string, and each name and value in order.

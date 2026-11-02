@@ -110,5 +110,10 @@ Then run `docker compose up --build --detach` again, since the pages are built w
 - The app's websocket and pages accept only the origin in `APP_URL`. A page opened at any other address cannot
   connect.
 - Behind another proxy, the stored client address of each request is that proxy's address, not the sender's.
+- The Caddy inside the image changes each request's headers before the app stores them. It groups headers by name,
+  though values of one name keep their order. It drops hop-by-hop headers, such as `Connection` and the headers it
+  names. It adds `Via`, and sets `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto` in place of any the
+  sender sent. It adds `Accept-Encoding: gzip` when the sender sent no `Accept-Encoding`. A proxy in front makes its
+  own changes. To store headers exactly as sent, run the app without Docker and with no proxy in front.
 - Back up the database with `docker compose exec postgres pg_dump -U studio studio > backup.sql`.
 - `docker compose down` stops everything and keeps the data. `docker compose down --volumes` deletes the data too.

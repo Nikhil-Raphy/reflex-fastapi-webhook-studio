@@ -7,8 +7,8 @@ it, in one process.
 ## What it does
 
 You make a bin and get a URL. Any request sent to that URL, or to a path under it, is stored: the method, path,
-query, headers in the order they came, and the exact body bytes. The bin's page in your browser shows each request
-the moment it arrives, with no refresh.
+query, headers in the order they reached the app, and the exact body bytes. The bin's page in your browser shows
+each request the moment it arrives, with no refresh.
 
 From that page you can filter and search the requests, delete them, export the bin as JSON, copy a request as a curl
 command, choose what the bin sends back, and send a request again to another URL. A REST API does the same for

@@ -5,8 +5,8 @@ Catch, inspect and replay webhooks and HTTP requests.
 ## What it does
 
 You make a bin and get a URL. Any request sent to that URL, or to a path under it, is stored: the method, path,
-query, headers in the order they came, and the exact body bytes. The bin's page in your browser shows each request
-the moment it arrives, with no refresh.
+query, headers in the order they reached the app, and the exact body bytes. The bin's page in your browser shows
+each request the moment it arrives, with no refresh.
 
 From that page you can filter and search the requests, delete them, export the bin as JSON, copy a request as a curl
 command, choose what the bin sends back, and send a request again to another URL. A REST API does the same for
@@ -99,7 +99,8 @@ path and how long ago it came. Click a row to see it on the right, in five tabs:
 
 - **Overview:** the request id, time, method, path, query string, content type, body size, client address, HTTP
   version and the status sent back.
-- **Headers:** every header in the order it came. Headers that often hold secrets, such as `Authorization`,
+- **Headers:** every header in the order it reached the app. In Docker, Caddy changes some headers first; see
+  [Limits and expiry](#limits-and-expiry). Headers that often hold secrets, such as `Authorization`,
   `Cookie` and names holding `token`, `secret`, `signature`, `api-key`, `password` or `session`, show as `••••` until
   you click them.
 - **Query:** the raw query string, and each name and value in order.
@@ -175,10 +176,10 @@ curl -s "$BASE/api/v1/bins/$BIN/requests?method=POST&q=invoice"
 curl -s $BASE/api/v1/bins/$BIN/requests/01a137d3-3e85-702c-be8d-84cdcc0283f7
 ```
 
-A request reply holds the headers and query as lists of name and value pairs, in the order they came. The body is
-in `body_base64`, and also in `body_text` when it is valid UTF-8. To read the next page, pass the id of the last
-request you got as `before`. To rename a bin, send `PATCH $BASE/api/v1/bins/$BIN` with `{"label": "Stripe"}`, or
-`{"label": null}` to clear the label; an open page shows the new label at once.
+A request reply holds the headers and query as lists of name and value pairs, in the order they reached the app.
+The body is in `body_base64`, and also in `body_text` when it is valid UTF-8. To read the next page, pass the id of
+the last request you got as `before`. To rename a bin, send `PATCH $BASE/api/v1/bins/$BIN` with
+`{"label": "Stripe"}`, or `{"label": null}` to clear the label; an open page shows the new label at once.
 
 To set the bin's reply, send the whole reply in a `PATCH`; `{"reply": null}` puts back the default:
 
@@ -270,6 +271,10 @@ app serves its OpenAPI page at `/api/docs` and the schema at `/api/openapi.json`
 - PostgreSQL cannot store the NUL character in text, so the app shows it as U+FFFD in the stored path, query, headers
   and content type. The stored body is always exact.
 - A request's `content_type` holds at most 255 characters of its `Content-Type`; its headers keep the whole value.
+- In Docker, the Caddy inside the image changes the headers before the app stores them. It groups them by name,
+  though values of one name keep their order, drops hop-by-hop headers such as `Connection`, and adds `Via`,
+  `X-Forwarded-*` and sometimes `Accept-Encoding`. The [deploy guide](docs/guide/deploy.md#what-to-know) has the
+  details. Run the app without Docker to store headers exactly as sent.
 
 ## Security notes
 

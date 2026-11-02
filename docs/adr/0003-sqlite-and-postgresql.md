@@ -45,4 +45,6 @@ command that starts the app, its database and Redis together.
   `localhost` address for the host the page came from, and drops the port under HTTPS, so a proxy with TLS works.
 - Behind the image's Caddy every request comes from `127.0.0.1`, so the app takes the sender's address from the last
   `X-Forwarded-For` entry, but only from a peer on the same machine.
+- Caddy groups headers by name, drops hop-by-hop headers and adds its own, so in Docker the stored headers are not
+  exactly as sent. Values of one name keep their order. Without Docker, the app stores headers exactly as sent.
 - CI builds the image, starts the whole stack and sends a request through it on every pull request.

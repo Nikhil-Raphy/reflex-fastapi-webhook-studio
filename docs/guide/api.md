@@ -65,8 +65,9 @@ curl -s $BASE/api/v1/bins/$BIN/requests/<request id>
 curl -s $BASE/api/v1/bins/$BIN/requests/<request id>/curl
 ```
 
-A request holds its headers and query as lists of name and value pairs, in the order they came. The body is in
-`body_base64`, and also in `body_text` when it is valid UTF-8.
+A request holds its headers and query as lists of name and value pairs, in the order they reached the app. In Docker,
+Caddy changes some headers first; see [What to know](deploy.md#what-to-know). The body is in `body_base64`, and also
+in `body_text` when it is valid UTF-8.
 
 ## Set the reply
 
