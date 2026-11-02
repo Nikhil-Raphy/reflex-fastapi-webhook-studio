@@ -60,7 +60,8 @@ since each page keeps a websocket open on `/_event`.
 Keep the pages and `/api/v1` on a private network, and expose only `/api/webhook/*` to the internet. One way is two
 host names on the proxy: a public one for senders that passes only capture paths, and a private one for your team.
 Set `APP_URL` to the private address and `WEBHOOK_STUDIO_PUBLIC_BASE_URL` to the public one, so the pages show
-capture URLs that senders can reach.
+capture URLs that senders can reach. A private DNS name is not enough: anyone who reaches the proxy can ask for that
+host, so the private site must refuse outside addresses itself.
 
 With [Caddy](https://caddyserver.com) on the host, which handles TLS and websockets by itself:
 
@@ -74,9 +75,14 @@ hooks.example.com {
 }
 
 studio.internal.example.com {
+	@outside not remote_ip private_ranges
+	respond @outside 403
 	reverse_proxy 127.0.0.1:17300
 }
 ```
+
+`private_ranges` covers the `10.`, `172.16.`, `192.168.` and loopback ranges and their IPv6 forms. If your VPN uses
+other addresses, such as Tailscale's `100.64.0.0/10`, add them after `private_ranges`.
 
 With nginx, the websocket needs its own lines:
 
