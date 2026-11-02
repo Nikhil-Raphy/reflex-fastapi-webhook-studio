@@ -547,6 +547,7 @@ def _reply_dialog() -> rx.Component:
                         placeholder="application/json",
                         value=_reply.content_type,
                         on_change=InspectorState.set_reply_content_type,
+                        aria_label="Content type",
                     ),
                 ),
                 field(
