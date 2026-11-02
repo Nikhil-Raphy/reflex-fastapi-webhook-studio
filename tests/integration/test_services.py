@@ -327,7 +327,7 @@ async def test_given_bin_last_used_eight_days_ago_when_sweeper_runs_then_it_is_g
     bus = MemoryBus()
     old = await BinService(database, SETTINGS, clock=lambda: NOW - timedelta(days=8)).create("old")
     fresh = await BinService(database, SETTINGS, clock=lambda: NOW).create("fresh")
-    await CaptureService(database, SETTINGS, clock=lambda: NOW - timedelta(days=8)).capture(
+    stale = await CaptureService(database, SETTINGS, clock=lambda: NOW - timedelta(days=8)).capture(
         old.id, INCOMING, reply_status=200
     )
     sweeper = Sweeper(database, 3600, bus=bus, clock=lambda: NOW)
@@ -341,7 +341,7 @@ async def test_given_bin_last_used_eight_days_ago_when_sweeper_runs_then_it_is_g
     assert event == BinEvent(type=EventType.BIN_DELETED, bin_id=old.id)
     assert (await BinService(database, SETTINGS).get(fresh.id)).label == "fresh"
     with pytest.raises(RequestNotFoundError):
-        await RequestService(database).get(old.id, uuid7())
+        await RequestService(database).get(old.id, stale.id)
 
 
 @pytest.mark.anyio
