@@ -43,7 +43,14 @@ def method_badge(method: Var[str]) -> rx.Component:
     """
 
     def badge(colour: Colour) -> rx.Component:
-        return rx.badge(method, color_scheme=colour, variant="soft", min_width="4.5em", justify="center")
+        return rx.badge(
+            method,
+            color_scheme=colour,
+            variant="outline",
+            high_contrast=True,
+            min_width="4.5em",
+            justify="center",
+        )
 
     return rx.box(
         rx.match(method, *((name, badge(colour)) for name, colour in METHOD_COLOURS), badge("gray")),

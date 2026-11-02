@@ -12,6 +12,7 @@ config = rx.Config(
         rx.plugins.SitemapPlugin(),
         # No @tailwindcss/typography: it pins postcss-selector-parser 6.0.10 (GHSA-rj75-hqrm-r3gf).
         rx.plugins.TailwindV4Plugin(config={"plugins": []}),
-        rx.plugins.RadixThemesPlugin(),
+        # Indigo, unlike Radix's default blue, gives white text on solid buttons the 4.5:1 contrast WCAG AA asks for.
+        rx.plugins.RadixThemesPlugin(theme=rx.theme(accent_color="indigo")),
     ],
 )
