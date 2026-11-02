@@ -1,0 +1,23 @@
+{
+	admin localhost:2019
+	persist_config off
+}
+
+:{$PORT} {
+	encode gzip
+
+	# Caddy groups headers by name, drops hop-by-hop ones and adds Via, X-Forwarded-* and Accept-Encoding,
+	# so captures through it are not exactly as sent. docs/guide/deploy.md lists the changes.
+	@backend path /api /api/* /_event /_event/* /ping /_health /_upload /_upload/* /_all_routes
+	handle @backend {
+		reverse_proxy 127.0.0.1:{$BACKEND_PORT}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} {path}/ /404.html
+		file_server {
+			precompressed br zstd gzip
+		}
+	}
+}

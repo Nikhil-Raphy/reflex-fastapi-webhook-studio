@@ -20,6 +20,8 @@ class HomeState(rx.State):
     open_text: rx.Field[str] = rx.field("")
     listing_all: rx.Field[bool] = rx.field(default=False)
     creating: rx.Field[bool] = rx.field(default=False)
+    loading: rx.Field[bool] = rx.field(default=True)
+    """Whether the page still waits for its first load."""
 
     def set_new_label(self, value: str) -> None:
         """Keep the label typed for a new bin.
@@ -52,6 +54,7 @@ class HomeState(rx.State):
             if missing:
                 self.known_bins = forget(self.known_bins, missing)
         self.bins = [bin_row(summary) for summary in summaries]
+        self.loading = False
 
     async def create_bin(self) -> AsyncIterator[EventSpec | None]:
         """Make a bin with the typed label, remember it in this browser, and open it.

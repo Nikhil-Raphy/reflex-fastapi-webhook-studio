@@ -2,6 +2,7 @@
 
 import asyncio
 from http import HTTPStatus
+from ipaddress import ip_address
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request, Response
@@ -21,6 +22,8 @@ if TYPE_CHECKING:
     from reflex_fastapi_webhook_studio.settings import Settings
 
 CAPTURE_PREFIX = "/api/webhook"
+LOOPBACK = frozenset({"127.0.0.1", "::1"})
+MAX_ADDRESS_LENGTH = 45
 # A capture reply may hold anything, so the browser must treat it as a sandboxed, opaque origin.
 SAFETY_HEADERS = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
 
@@ -82,6 +85,30 @@ async def read_body(request: Request, limit: int) -> tuple[bytes, int, bool]:
     return b"".join(chunks), size, False
 
 
+def client_address(request: Request) -> str | None:
+    """Find the sender's address.
+
+    Behind a proxy on the same machine, such as the Caddy in the Docker image, the peer is the proxy, so the last
+    entry across all `X-Forwarded-For` lines (the one that proxy added) names the sender. The peer counts instead
+    when it is on another machine, or when that entry is not an IP address that fits the stored column.
+
+    Args:
+        request: The request.
+
+    Returns:
+        The address, or None if unknown.
+    """
+    peer = None if request.client is None else request.client.host
+    if peer not in LOOPBACK:
+        return peer
+    forwarded = ",".join(request.headers.getlist("x-forwarded-for")).rsplit(",", 1)[-1].strip()
+    try:
+        address = str(ip_address(forwarded))
+    except ValueError:
+        return peer
+    return address if len(address) <= MAX_ADDRESS_LENGTH else peer
+
+
 def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncated: bool) -> IncomingRequest:
     """Collect what the app stores about a request.
 
@@ -104,7 +131,7 @@ def to_incoming(request: Request, path: str, body: bytes, size: int, *, truncate
         body_size=size,
         body_truncated=truncated,
         content_type=request.headers.get("content-type"),
-        remote_addr=None if request.client is None else request.client.host,
+        remote_addr=client_address(request),
         http_version=request.scope.get("http_version", "1.1"),
     )
 

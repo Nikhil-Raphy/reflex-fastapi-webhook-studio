@@ -9,6 +9,7 @@ from uuid import uuid7
 from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.db import repository
 from reflex_fastapi_webhook_studio.domain import (
+    MAX_CONTENT_TYPE_LENGTH,
     BinEvent,
     BinNotFoundError,
     CapturedRequest,
@@ -52,7 +53,8 @@ class CaptureService:
     async def capture(self, bin_id: str, incoming: IncomingRequest, *, reply_status: int) -> CapturedRequest:
         """Store a request, drop the bin's oldest beyond the cap, and push the bin's expiry out, in one transaction.
 
-        Then tell the bin's open inspectors about it.
+        Then tell the bin's open inspectors about it. A content type over 255 characters is cut to fit its column; the
+        headers keep it whole.
 
         Args:
             bin_id: The bin id from the URL.
@@ -84,7 +86,11 @@ class CaptureService:
             body_size=incoming.body_size,
             body_truncated=incoming.body_truncated,
             body_preview=body_preview(incoming.body),
-            content_type=None if incoming.content_type is None else storable_text(incoming.content_type),
+            content_type=(
+                None
+                if incoming.content_type is None
+                else storable_text(incoming.content_type)[:MAX_CONTENT_TYPE_LENGTH]
+            ),
             remote_addr=incoming.remote_addr,
             http_version=incoming.http_version,
             reply_status=reply_status,

@@ -3,12 +3,15 @@
 
 title 01 Context: Reflex FastAPI Webhook Studio
 
-Person(developer, "Developer", "Creates bins and reads the requests they caught.")
+Person(developer, "Developer", "Makes bins, watches and manages the requests they catch, sets replies and replays requests.")
 System_Ext(sender, "Sender", "A webhook service, a web page or curl.")
-System(studio, "Reflex FastAPI Webhook Studio", "Catches HTTP requests in bins, stores them, and serves them back through a REST API.")
+System(studio, "Reflex FastAPI Webhook Studio", "Catches HTTP requests in bins, stores them, shows them live in web pages, and serves them through a REST API.")
+System_Ext(target, "Replay target", "Any HTTP service a developer replays a request to. Public internet only, unless the replay mode is local.")
 
-Rel(sender, studio, "Sends requests to a bin", "HTTP, /api/webhook/{bin_id}/...")
-Rel(developer, studio, "Creates bins and reads requests", "HTTP, JSON, /api/v1")
+Rel(sender, studio, "Sends requests to a bin; gets the bin's reply", "HTTP, /api/webhook/{bin_id}/...")
+Rel(developer, studio, "Uses the web pages", "HTTP, WebSocket /_event")
+Rel(developer, studio, "Scripts bins and requests", "HTTP, JSON, /api/v1")
+Rel(studio, target, "Replays a stored request", "HTTP or HTTPS, no redirects")
 
 SHOW_LEGEND()
 @enduml

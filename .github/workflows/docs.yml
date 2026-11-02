@@ -12,11 +12,12 @@ concurrency:
 
 jobs:
   deploy:
+    name: deploy
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pages: write
-      id-token: write
+      contents: read # check out the repo
+      pages: write # publish the site to GitHub Pages
+      id-token: write # prove to Pages that this run is who it says
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

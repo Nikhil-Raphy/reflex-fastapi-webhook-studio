@@ -106,7 +106,12 @@ def _body_content(
             kind,
             ("empty", rx.text("No body.", color_scheme="gray")),
             ("truncated", rx.text("The body was over the size cap, so it was not kept.", color_scheme="gray")),
-            ("json", rx.code_block(text, language="json", wrap_long_lines=True, width="100%")),
+            (
+                "json",
+                rx.code_block(
+                    text, language="json", theme=rx.code_block.themes.a11y_dark, wrap_long_lines=True, width="100%"
+                ),
+            ),
             ("form", form),
             ("binary", rx.hstack(rx.text("Binary body, ", size, " bytes."), binary_extra, align="center")),
             rx.text(text, white_space="pre-wrap", font_family="var(--code-font-family)", size="2"),
@@ -117,7 +122,7 @@ def _body_content(
 
 def _body() -> rx.Component:
     download = rx.button(
-        Icon.create("download", size=16), "Download", on_click=InspectorState.download_body, variant="soft", size="1"
+        Icon.create("download", size=16), "Download", on_click=InspectorState.download_body, variant="outline", size="1"
     )
     return rx.box(
         _body_content(
@@ -195,7 +200,13 @@ def _replay_tab() -> rx.Component:
         ),
         rx.cond(
             InspectorState.replay_error != "",
-            rx.callout(InspectorState.replay_error, icon="triangle_alert", color_scheme="red", size="1"),
+            rx.callout(
+                InspectorState.replay_error,
+                icon="triangle_alert",
+                color_scheme="red",
+                size="1",
+                custom_attrs={"data-testid": "replay-error"},
+            ),
         ),
         rx.cond(_replay.status.to(int) > 0, _replay_result()),
         width="100%",
@@ -248,7 +259,7 @@ def _detail_panel() -> rx.Component:
                 Icon.create("terminal", size=16),
                 "Copy as curl",
                 on_click=InspectorState.copy_as_curl,
-                variant="soft",
+                variant="outline",
                 size="1",
                 custom_attrs={"data-testid": "copy-as-curl"},
             ),
@@ -273,8 +284,16 @@ def _empty_state() -> rx.Component:
         rx.vstack(
             rx.heading("Waiting for requests…", size="4"),
             rx.text("Send a request to the bin URL, for example:"),
-            rx.code_block(InspectorState.curl_command, language="bash", wrap_long_lines=True, width="100%"),
-            rx.button(Icon.create("copy", size=16), "Copy command", on_click=InspectorState.copy_curl, variant="soft"),
+            rx.code_block(
+                InspectorState.curl_command,
+                language="bash",
+                theme=rx.code_block.themes.a11y_dark,
+                wrap_long_lines=True,
+                width="100%",
+            ),
+            rx.button(
+                Icon.create("copy", size=16), "Copy command", on_click=InspectorState.copy_curl, variant="outline"
+            ),
             width="100%",
         ),
         width="100%",
@@ -286,7 +305,7 @@ def _filters() -> rx.Component:
     return rx.vstack(
         rx.hstack(
             rx.select.root(
-                rx.select.trigger(custom_attrs={"data-testid": "method-filter"}),
+                rx.select.trigger(aria_label="Filter by method", custom_attrs={"data-testid": "method-filter"}),
                 rx.select.content(
                     rx.select.item("All methods", value=ALL_METHODS),
                     *(rx.select.item(method.value, value=method.value) for method in HttpMethod),
@@ -372,17 +391,23 @@ def _bin_actions() -> rx.Component:
             Icon.create("reply", size=16),
             "Reply settings",
             on_click=InspectorState.open_reply,
-            variant="soft",
+            variant="outline",
             size="1",
             custom_attrs={"data-testid": "reply-settings"},
         ),
         rx.button(
-            Icon.create("file-down", size=16),
-            "Export",
-            on_click=InspectorState.export,
-            variant="soft",
+            rx.el.a(
+                Icon.create("file-down", size=16),
+                "Export",
+                href=InspectorState.export_url,
+                download="",
+                # rx.el.a is React Router's Link, which would route a same-origin click itself and skip the download.
+                reload_document=True,
+                custom_attrs={"data-testid": "export"},
+            ),
+            as_child=True,
+            variant="outline",
             size="1",
-            custom_attrs={"data-testid": "export"},
         ),
         rx.button(
             Icon.create("eraser", size=16),
@@ -427,6 +452,7 @@ def _confirm_dialog() -> rx.Component:
                         action,
                         on_click=InspectorState.confirm,
                         color_scheme="red",
+                        variant="soft",
                         custom_attrs={"data-testid": "confirm-delete"},
                     )
                 ),
@@ -500,12 +526,18 @@ def _reply_dialog() -> rx.Component:
                             value=_reply.status,
                             on_change=InspectorState.set_reply_status,
                             type="number",
+                            aria_label="Status",
                             custom_attrs={"data-testid": "reply-status"},
                         ),
                     ),
                     field(
                         "Delay (ms)",
-                        rx.input(value=_reply.delay_ms, on_change=InspectorState.set_reply_delay, type="number"),
+                        rx.input(
+                            value=_reply.delay_ms,
+                            on_change=InspectorState.set_reply_delay,
+                            type="number",
+                            aria_label="Delay (ms)",
+                        ),
                     ),
                     width="100%",
                 ),
@@ -515,6 +547,7 @@ def _reply_dialog() -> rx.Component:
                         placeholder="application/json",
                         value=_reply.content_type,
                         on_change=InspectorState.set_reply_content_type,
+                        aria_label="Content type",
                     ),
                 ),
                 field(
@@ -551,13 +584,20 @@ def _reply_dialog() -> rx.Component:
                         rows="6",
                         width="100%",
                         font_family="var(--code-font-family)",
+                        aria_label="Custom body",
                         custom_attrs={"data-testid": "reply-body"},
                     ),
                     rx.text('Sends {"ok": true, "request_id": "…"} as JSON.', size="1", color_scheme="gray"),
                 ),
                 rx.cond(
                     InspectorState.reply_error != "",
-                    rx.callout(InspectorState.reply_error, icon="triangle_alert", color_scheme="red", size="1"),
+                    rx.callout(
+                        InspectorState.reply_error,
+                        icon="triangle_alert",
+                        color_scheme="red",
+                        size="1",
+                        custom_attrs={"data-testid": "reply-error"},
+                    ),
                 ),
                 rx.hstack(
                     rx.button("Use default", on_click=InspectorState.default_reply, variant="ghost"),
@@ -581,14 +621,14 @@ def _bin_view() -> rx.Component:
     return rx.vstack(
         top_bar(
             rx.text("▸"),
-            rx.text(InspectorState.label, weight="medium"),
+            rx.text(InspectorState.label, weight="medium", custom_attrs={"data-testid": "bin-label"}),
             rx.spacer(),
             status_dot(InspectorState.live),
         ),
         rx.hstack(
-            rx.code(InspectorState.capture_url, custom_attrs={"data-testid": "capture-url"}),
+            rx.code(InspectorState.capture_url, variant="outline", custom_attrs={"data-testid": "capture-url"}),
             rx.button(
-                Icon.create("copy", size=16), "Copy URL", on_click=InspectorState.copy_url, variant="soft", size="1"
+                Icon.create("copy", size=16), "Copy URL", on_click=InspectorState.copy_url, variant="outline", size="1"
             ),
             rx.text("Expires ", Moment.create(InspectorState.expires_at, from_now=True), size="1", color_scheme="gray"),
             align="center",
@@ -625,16 +665,20 @@ def inspector() -> rx.Component:
     """
     return rx.box(
         rx.cond(
-            InspectorState.found,
-            _bin_view(),
-            rx.vstack(
-                top_bar(),
-                rx.cond(
-                    InspectorState.deleted,
-                    rx.callout("This bin was deleted.", icon="info", color_scheme="gray"),
-                    rx.callout("No bin has this id.", icon="triangle_alert", color_scheme="red"),
+            InspectorState.loading,
+            rx.center(rx.spinner(size="3", custom_attrs={"data-testid": "loading"}), padding="4rem"),
+            rx.cond(
+                InspectorState.found,
+                _bin_view(),
+                rx.vstack(
+                    top_bar(),
+                    rx.cond(
+                        InspectorState.deleted,
+                        rx.callout("This bin was deleted.", icon="info", color_scheme="gray"),
+                        rx.callout("No bin has this id.", icon="triangle_alert", color_scheme="red"),
+                    ),
+                    rx.link("Back to the home page", href="/"),
                 ),
-                rx.link("Back to the home page", href="/"),
             ),
         ),
         padding="1rem 1.5rem",
