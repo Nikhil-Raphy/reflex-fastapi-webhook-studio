@@ -269,6 +269,7 @@ app serves its OpenAPI page at `/api/docs` and the schema at `/api/openapi.json`
 - A replay reads at most 1 MiB of the reply, and the page shows the first 64 KiB.
 - PostgreSQL cannot store the NUL character in text, so the app shows it as U+FFFD in the stored path, query, headers
   and content type. The stored body is always exact.
+- A request's `content_type` holds at most 255 characters of its `Content-Type`; its headers keep the whole value.
 
 ## Security notes
 

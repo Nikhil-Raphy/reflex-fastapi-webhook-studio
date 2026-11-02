@@ -12,6 +12,7 @@ import pytest
 
 from reflex_fastapi_webhook_studio.bus.memory_bus import MemoryBus
 from reflex_fastapi_webhook_studio.domain import (
+    MAX_CONTENT_TYPE_LENGTH,
     BinEvent,
     BinLimitError,
     BinListing,
@@ -130,6 +131,21 @@ async def test_given_nul_in_path_and_query_when_captured_then_stored_with_replac
     # Then
     assert stored.path == "/a\ufffdb"
     assert stored.query_params == (("q", "\ufffd"),)
+
+
+@pytest.mark.anyio
+async def test_given_long_content_type_when_captured_then_it_is_cut_to_fit(database: Database) -> None:
+    """Given a 300-character Content-Type, when captured, then the first 255 are kept and the header stays whole."""
+    # Given
+    bin_ = await BinService(database, SETTINGS, clock=lambda: NOW).create(None)
+    long_type = f"text/plain; x={'a' * 286}"
+    incoming = replace(INCOMING, headers=(("content-type", long_type),), content_type=long_type)
+    # When
+    stored = await CaptureService(database, SETTINGS, clock=lambda: NOW).capture(bin_.id, incoming, reply_status=200)
+    # Then
+    assert await RequestService(database).get(bin_.id, stored.id) == stored
+    assert stored.content_type == long_type[:MAX_CONTENT_TYPE_LENGTH]
+    assert stored.headers == (("content-type", long_type),)
 
 
 @pytest.mark.anyio
