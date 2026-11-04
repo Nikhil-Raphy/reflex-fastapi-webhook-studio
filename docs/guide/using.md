@@ -1,5 +1,7 @@
 # Use the pages
 
+Every page shows the app's version, such as `v1.2.0`, beside the app's name at the top.
+
 ## Make and open bins
 
 On the home page, type a label if you want one and press **New bin**. The bin's page opens with its URL, a

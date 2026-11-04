@@ -8,6 +8,8 @@ from reflex_base.event import EventSpec
 from reflex_base.vars.base import Var
 from reflex_components_core.core.banner import has_connection_errors, has_too_many_connection_errors
 
+from reflex_fastapi_webhook_studio import __version__
+
 type Colour = Literal["green", "blue", "orange", "purple", "red", "gray", "amber"]
 METHOD_COLOURS: tuple[tuple[str, Colour], ...] = (
     ("GET", "green"),
@@ -85,16 +87,17 @@ def status_dot(live: Var[bool]) -> rx.Component:
 
 
 def top_bar(*children: rx.Component) -> rx.Component:
-    """Show the app name, linked to the home page, followed by the given parts.
+    """Show the app name, linked to the home page, and its version, followed by the given parts.
 
     Args:
-        *children: What follows the app name.
+        *children: What follows the app name and version.
 
     Returns:
         The bar.
     """
     return rx.hstack(
         rx.link(rx.heading("Webhook Studio", size="5"), href="/", underline="none"),
+        rx.text(f"v{__version__}", size="1", color_scheme="gray", custom_attrs={"data-testid": "app-version"}),
         *children,
         align="center",
         spacing="3",
