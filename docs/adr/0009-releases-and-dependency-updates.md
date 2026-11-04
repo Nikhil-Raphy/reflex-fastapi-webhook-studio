@@ -12,12 +12,12 @@ build from source.
 ## Decision
 
 - Commits follow Conventional Commits. A pre-commit hook checks each commit message.
-- release-please (a GitHub Action) opens a release pull request. Merging it bumps the version in `pyproject.toml`
-  and `uv.lock`, writes `CHANGELOG.md` (it creates the file on the first release), tags `vX.Y.Z` and makes a
-  GitHub release.
-- `pyproject.toml` is the one place that holds the version. The `uv_build` backend needs it there as a fixed value;
-  it cannot read it from a `__version__` file. The package sets `__version__` from the installed package metadata,
-  and the health route returns it, so no other file holds a copy to keep in step.
+- release-please (a GitHub Action) opens a release pull request. Merging it sets the version in
+  `reflex_fastapi_webhook_studio/_version.py`, writes `CHANGELOG.md` (it creates the file on the first release), tags
+  `vX.Y.Z` and makes a GitHub release.
+- `reflex_fastapi_webhook_studio/_version.py` is the one place that holds the version. Hatchling reads it at build
+  time, the package imports it, and the health route returns it. `pyproject.toml` marks the version as dynamic, so
+  neither it nor `uv.lock` holds a copy. To change the version by hand, edit that one line.
 - Dependabot sends weekly grouped updates for `uv` and `github-actions`. It proposes a release only once it is 7
   days old, so a bad release has time to be pulled first. Security updates do not wait.
 - Workflows pin each action by commit SHA.
@@ -27,5 +27,5 @@ build from source.
 
 - A release needs no manual step beyond merging a pull request.
 - Every commit message must follow Conventional Commits; the pre-commit hook rejects any that do not.
-- release-please does not know `uv.lock`, so `release-please-config.json` names it as an extra file. Without that,
-  `uv sync --locked` would fail after each release.
+- release-please uses its `simple` release type, which knows no Python files, and updates `_version.py` through the
+  `x-release-please-version` mark on its version line. `release-please-config.json` names the file as an extra file.
