@@ -22,6 +22,7 @@ mode and in Docker, use port 17300. The app serves its OpenAPI page at `/api/doc
 | GET    | `/api/v1/bins/{bin_id}/requests/{request_id}/curl` | The request as a curl command, as plain text |
 | POST   | `/api/v1/bins/{bin_id}/requests/{request_id}/replay` | Send the request to another URL           |
 | GET    | `/api/v1/health`                              | Check that the app, its database and Redis, when used, answer |
+| GET    | `/api/v1/version`                             | Read the app's version, as `{"version": "1.2.0"}`. It checks nothing else, so it answers even when health fails. |
 
 Request routes sit under their bin, so you need the bin's id to read or change a request.
 
