@@ -1,6 +1,5 @@
 """Catch, inspect and replay webhooks and HTTP requests."""
 
-from importlib.metadata import version
+from reflex_fastapi_webhook_studio._version import __version__
 
-# pyproject.toml holds the version; uv_build cannot read it from a file.
-__version__ = version("reflex-fastapi-webhook-studio")
+__all__ = ["__version__"]

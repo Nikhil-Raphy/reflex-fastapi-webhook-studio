@@ -1,6 +1,6 @@
 [project]
 name = "reflex-fastapi-webhook-studio"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Catch, inspect and replay webhooks and HTTP requests."
 readme = "README.md"
 authors = [{ name = "Nikhil Raphy" }]
@@ -22,12 +22,18 @@ postgres = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.21,<0.13.0"]
-build-backend = "uv_build"
+requires = ["hatchling>=1.33.0,<2"]
+build-backend = "hatchling.build"
 
-[tool.uv.build-backend]
-module-name = "reflex_fastapi_webhook_studio"
-module-root = ""
+# The version lives only in _version.py; uv_build cannot read a version from a file.
+[tool.hatch.version]
+path = "reflex_fastapi_webhook_studio/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["reflex_fastapi_webhook_studio"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "reflex_fastapi_webhook_studio/_version.py" }]
 
 [dependency-groups]
 dev = [

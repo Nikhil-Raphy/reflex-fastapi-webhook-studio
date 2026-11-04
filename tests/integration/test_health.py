@@ -1,4 +1,4 @@
-"""Tests for the health route."""
+"""Tests for the health and version routes."""
 
 import os
 from typing import TYPE_CHECKING
@@ -38,6 +38,20 @@ async def test_given_broken_database_when_health_is_requested_then_503_problem(t
     assert response.status_code == 503
     assert response.headers["content-type"] == "application/problem+json"
     assert response.json()["check"] == "database"
+    await broken.engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_given_broken_database_when_version_is_requested_then_it_still_answers(tmp_path: Path) -> None:
+    """Given a database that cannot open, when a client asks for the version, then it gets 200 with the version."""
+    # Given
+    broken = Database(f"sqlite+aiosqlite:///{tmp_path / 'missing' / 'studio.db'}")
+    async with api_client(broken) as client:
+        # When
+        response = await client.get("/api/v1/version")
+    # Then
+    assert response.status_code == 200
+    assert response.json() == {"version": __version__}
     await broken.engine.dispose()
 
 

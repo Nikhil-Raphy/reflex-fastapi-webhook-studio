@@ -15,7 +15,7 @@ from reflex_fastapi_webhook_studio.api.bins import bins_router
 from reflex_fastapi_webhook_studio.api.capture import CaptureReplyHeaders, capture_router
 from reflex_fastapi_webhook_studio.api.problems import add_problem_handlers, problem
 from reflex_fastapi_webhook_studio.api.requests import requests_router
-from reflex_fastapi_webhook_studio.api.schemas import HealthOut
+from reflex_fastapi_webhook_studio.api.schemas import HealthOut, VersionOut
 from reflex_fastapi_webhook_studio.security.ssrf import resolve
 from reflex_fastapi_webhook_studio.services.bins import BinService
 from reflex_fastapi_webhook_studio.services.capture import CaptureService
@@ -80,6 +80,22 @@ def health_router(database: Database, redis: Redis | None = None) -> APIRouter:
     return router
 
 
+def version_router() -> APIRouter:
+    """Build the version route.
+
+    Returns:
+        The router.
+    """
+    router = APIRouter(prefix="/api/v1", tags=["version"])
+
+    @router.get("/version", response_model=VersionOut)
+    async def version() -> VersionOut:
+        """Report the app's version; it reads nothing else, so it answers even when health fails."""
+        return VersionOut(version=__version__)
+
+    return router
+
+
 def create_api(
     settings: Settings,
     database: Database,
@@ -114,6 +130,7 @@ def create_api(
     add_problem_handlers(api)
     api.add_middleware(CaptureReplyHeaders, cors_enabled=settings.cors_enabled)
     api.include_router(health_router(database, redis))
+    api.include_router(version_router())
     api.include_router(bins_router(bins, ExportService(database)))
     api.include_router(requests_router(requests, replays, settings))
     api.include_router(capture_router(CaptureService(database, settings, bus=bus), bins, settings))

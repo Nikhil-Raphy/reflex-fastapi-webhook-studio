@@ -179,6 +179,12 @@ class HealthOut(BaseModel):
     redis: Literal["ok"] | None = None
 
 
+class VersionOut(BaseModel):
+    """The version reply."""
+
+    version: str
+
+
 class CaptureOut(BaseModel):
     """The default reply of a capture route."""
 

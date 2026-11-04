@@ -4,6 +4,7 @@ from typing import Any
 
 import reflex as rx
 
+from reflex_fastapi_webhook_studio import __version__
 from reflex_fastapi_webhook_studio.ui.pages.home import home
 from reflex_fastapi_webhook_studio.ui.pages.inspector import inspector
 
@@ -76,3 +77,13 @@ def test_given_inspector_page_when_built_then_search_waits_300_ms_after_typing_s
     assert search is not None
     assert search["name"] == "DebounceInput"
     assert "debounceTimeout:300" in search["props"]
+
+
+def test_given_each_page_when_built_then_its_top_bar_shows_the_app_version() -> None:
+    """Given the home and inspector pages, when built, then each shows "v" and the app's version in its top bar."""
+    # Given
+    pages = (home, inspector)
+    # When
+    found = [by_test_id(page().render(), "app-version") for page in pages]
+    # Then
+    assert all(part is not None and f"v{__version__}" in str(part) for part in found)

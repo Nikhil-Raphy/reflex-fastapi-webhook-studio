@@ -248,9 +248,12 @@ open), `APP_BIND` and `APP_PORT` (where Compose publishes the app) and `GRANIAN_
 | GET    | `/api/v1/bins/{bin_id}/requests/{request_id}/curl` | The request as a curl command, as plain text |
 | POST   | `/api/v1/bins/{bin_id}/requests/{request_id}/replay` | Send the request to `target_url`; set `use_original_query` to `false` to leave its query out |
 | GET    | `/api/v1/health`                              | Check that the app, its database and Redis, when used, answer |
+| GET    | `/api/v1/version`                             | Read the app's version                         |
 
 `GET /api/v1/health` returns `{"status": "ok", "version": "<app version>", "database": "ok"}`, with `"redis": "ok"`
 added when the app uses Redis. It returns `503`, naming the failed check, if the database or Redis does not answer.
+`GET /api/v1/version` returns `{"version": "<app version>"}` and checks nothing else, so it answers even then. Each
+page shows the same version beside the app's name.
 
 Errors come as [problem details](https://www.rfc-editor.org/rfc/rfc9457) with the type
 `application/problem+json`. A reply setting that breaks a rule, or a replay target that is not an `http` or `https`

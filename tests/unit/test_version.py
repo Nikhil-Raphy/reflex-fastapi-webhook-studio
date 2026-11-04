@@ -1,16 +1,16 @@
 """Tests for the package version."""
 
-import tomllib
-from pathlib import Path
+from importlib.metadata import version
 
 import reflex_fastapi_webhook_studio
+from reflex_fastapi_webhook_studio import _version
 
 
-def test_given_pyproject_version_when_package_is_imported_then_version_matches() -> None:
-    """Given the version in pyproject.toml, when the package is imported, then __version__ matches it."""
+def test_given_version_file_when_package_is_installed_then_metadata_and_package_match_it() -> None:
+    """Given the version in _version.py, when the package is installed, then its metadata and __version__ match it."""
     # Given
-    pyproject = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    expected = _version.__version__
     # When
-    version = reflex_fastapi_webhook_studio.__version__
+    installed = version("reflex-fastapi-webhook-studio")
     # Then
-    assert version == pyproject["project"]["version"]
+    assert (installed, reflex_fastapi_webhook_studio.__version__) == (expected, expected)

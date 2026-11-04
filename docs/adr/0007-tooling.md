@@ -11,8 +11,9 @@ length of 120. It needs strict typing and as few tools as possible.
 
 ## Decision
 
-- **Packaging:** `uv` with the `uv_build` backend, a flat layout (`module-root = ""`, as Reflex expects), Python
-  3.14 pinned in `.python-version` and a committed `uv.lock`.
+- **Packaging:** `uv` with the hatchling backend, a flat layout (the package sits at the repo root, as Reflex
+  expects), Python 3.14 pinned in `.python-version` and a committed `uv.lock`. Hatchling reads the version from
+  `reflex_fastapi_webhook_studio/_version.py`, which `uv_build` cannot do.
 - **Lint and format:** Ruff with `select = ["ALL"]`. Ruff's isort rules sort imports and its formatter writes Black
   style, so we do not run isort or Black on their own.
 - **Second linter:** pylint. Each message we turn off carries a reason in `pyproject.toml`.
