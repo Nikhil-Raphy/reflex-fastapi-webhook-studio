@@ -5,7 +5,7 @@
 # The address users open; the frontend is built with it so the browser finds the backend.
 ARG API_URL=http://localhost:17300
 
-FROM python:3.14.10-slim@sha256:3cabfd7d7aaf394e6040e79fa1eec6ca1c52b74ed9188650472695d9a9326999 AS builder
+FROM python:3.15.0-slim@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a /uv /bin/uv
 # Reflex uses a bun on PATH instead of downloading its own; this is the version Reflex 0.10.1 asks for.
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     REFLEX_API_URL=${API_URL} reflex export --frontend-only --no-zip
 
 
-FROM python:3.14.10-slim@sha256:3cabfd7d7aaf394e6040e79fa1eec6ca1c52b74ed9188650472695d9a9326999
+FROM python:3.15.0-slim@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58
 
 COPY --from=caddy:2.11.7@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e /usr/bin/caddy /usr/bin/caddy
 
